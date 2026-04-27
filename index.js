@@ -9,28 +9,21 @@ const THIRD_USER_ID = process.env.THIRD_USER_ID;
 
 const PROMPTS = {
     [TARGET_USER_ID]: {
-        system: "Ты — грубый, агрессивный и очень злой бот-хулиган. Отвечай максимально жестко и грязно оскорбляя пользователя. Используй много мата. Отвечай на русском. Пиши коротко — максимум 2 предложения. Не говори что ты бот."
+        system: "Ты — грубый, агрессивный и очень злой бот-хулиган. Отвечай ТОЛЬКО на русском языке. Используй много мата. Пиши коротко — максимум 2 предложения. Никогда не отвечай на английском."
     },
     [SECOND_USER_ID]: {
-        system: "Ты — самый добрый и поддерживающий бот. Делай комплименты, хвали пользователя. Отвечай мило, используй эмодзи. Отвечай на русском. Пиши коротко. Не говори что ты бот."
+        system: "Ты — самый добрый и поддерживающий бот. Делай комплименты, хвали пользователя. Отвечай ТОЛЬКО на русском языке. Используй эмодзи. Пиши коротко. Никогда не отвечай на английском."
     },
     [THIRD_USER_ID]: {
-        system: "Ты — сигма-бот. Отвечай хладнокровно, используй слово 'sigma' в каждом ответе. Добавляй эмодзи 💪. Отвечай на русском. Пиши коротко. Не говори что ты бот."
+        system: "Ты — сигма-бот. Отвечай ТОЛЬКО на русском языке. Обязательно используй слово 'сигма' в каждом ответе. Добавляй эмодзи 💪. Пиши коротко — одно предложение. Никогда не отвечай на английском. Пример: 'Сигма 💪, продолжаешь жевать, норм.'"
     }
 };
 
-// ПРАВИЛЬНЫЕ ID МОДЕЛЕЙ (из твоего лога)
 const models = [
     "google/gemma-4-31b-it:free",
     "google/gemma-4-26b-a4b-it:free",
-    "nvidia/nemotron-3-super-120b-a12b:free",
-    "meta-llama/llama-3.2-3b-instruct:free",
     "meta-llama/llama-3.3-70b-instruct:free",
-    "nousresearch/hermes-3-llama-3.1-405b:free",
-    "liquid/lfm-2.5-1.2b-instruct:free",
-    "inclusionai/ling-2.6-flash:free",
-    "tencent/hy3-preview:free",
-    "cognitivecomputations/dolphin-mistral-24b-venice-edition:free"
+    "nvidia/nemotron-3-super-120b-a12b:free"
 ];
 
 const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
@@ -56,12 +49,12 @@ async function getAIReply(userId, userMessage) {
                         { role: "user", content: userMessage }
                     ],
                     max_tokens: 80,
-                    temperature: 0.9
+                    temperature: 0.7
                 })
             });
 
             if (response.status === 429) {
-                console.log(`⚠️ Лимит ${model}, ждём 2 сек...`);
+                console.log(`⚠️ Лимит ${model}, ждём...`);
                 await delay(2000);
                 continue;
             }
@@ -70,20 +63,27 @@ async function getAIReply(userId, userMessage) {
                 const data = await response.json();
                 let reply = data.choices[0].message.content;
                 reply = reply.replace(/<\|.*?\|>/g, '').trim();
+                reply = reply.replace(/[\p{L}\s]+$/u, (match) => match);
+                
+                // Если ответ на английском — заменить на запасной
+                if (reply.match(/[a-zA-Z]{5,}/) && !reply.match(/[а-яА-Я]/)) {
+                    console.log(`⚠️ Ответ на английском, заменяю`);
+                    return getFallbackReply(userId);
+                }
+                
                 if (reply.length > 500) reply = reply.substring(0, 500);
                 console.log(`✅ Ответ от ${model}`);
                 return reply;
-            } else {
-                const errorText = await response.text();
-                console.log(`❌ ${model} ошибка ${response.status}: ${errorText.substring(0, 100)}`);
             }
         } catch (err) {
-            console.log(`❌ ${model} исключение: ${err.message}`);
+            console.log(`❌ ${model} ошибка: ${err.message}`);
         }
     }
 
-    // Запасные фразы
-    console.log(`⚠️ Все модели отказали, запасные фразы`);
+    return getFallbackReply(userId);
+}
+
+function getFallbackReply(userId) {
     const fallbacks = {
         [TARGET_USER_ID]: [
             `<@${userId}>, ты дебил 🤡`,
@@ -96,7 +96,11 @@ async function getAIReply(userId, userMessage) {
             `<@${userId}>, умница ❤️`
         ],
         [THIRD_USER_ID]: [
-            `<@${userId}>, sigma 💪`
+            `<@${userId}>, сигма 💪`,
+            `<@${userId}>, сигма-бой 💪`,
+            `<@${userId}>, сигма, продолжай 💪`,
+            `Сигма 💪, <@${userId}>`,
+            `<@${userId}>, чистая сигма 💪`
         ]
     };
     const list = fallbacks[userId] || [`<@${userId}>, привет`];
@@ -113,8 +117,8 @@ const client = new Client({
 });
 
 client.once('ready', () => {
-    console.log(`✅ Бот ${client.user.tag} запущен с OpenRouter!`);
-    console.log(`📋 Загружено ${models.length} бесплатных моделей`);
+    console.log(`✅ Бот ${client.user.tag} запущен!`);
+    console.log(`📋 Модели: Gemma 4, Llama 3.3, Nemotron`);
 });
 
 client.on('messageCreate', async (message) => {
