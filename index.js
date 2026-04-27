@@ -1,24 +1,23 @@
 const { Client, GatewayIntentBits } = require('discord.js');
 
-// НАСТРОЙКИ
-const TOKEN = process.env.DISCORD_TOKEN;
+const TOKEN = process.env.DISCORD_TOKEN ? process.env.DISCORD_TOKEN.trim().replace(/^["']|["']$/g, '') : null;
 const TARGET_USER_ID = process.env.TARGET_USER_ID;
 
-// ОТЛАДКА: проверим, видит ли бот переменные
 console.log("=== ОТЛАДКА ===");
 console.log("Токен получен?", TOKEN ? "ДА" : "НЕТ");
-console.log("Токен начинается с:", TOKEN ? TOKEN.substring(0, 15) + "..." : "пусто");
+console.log("Длина токена:", TOKEN ? TOKEN.length : 0);
+console.log("Токен начинается с:", TOKEN ? TOKEN.substring(0, 20) + "..." : "пусто");
 console.log("ID цели получен?", TARGET_USER_ID ? "ДА" : "НЕТ");
 console.log("ID цели:", TARGET_USER_ID);
 console.log("==============");
 
 if (!TOKEN) {
-    console.error("❌ ОШИБКА: Токен не найден! Переменная DISCORD_TOKEN не установлена в Railway");
+    console.error("❌ ОШИБКА: Токен не найден");
     process.exit(1);
 }
 
-if (!TARGET_USER_ID) {
-    console.error("❌ ОШИБКА: ID пользователя не найден! Переменная TARGET_USER_ID не установлена");
+if (TOKEN.length < 50) {
+    console.error("❌ ОШИБКА: Токен слишком короткий —", TOKEN.length, "символов (должно быть около 70-100)");
     process.exit(1);
 }
 
@@ -32,15 +31,13 @@ const client = new Client({
 });
 
 client.on('ready', () => {
-    console.log(`✅ Бот ${client.user.tag} запущен и следит за другом!`);
+    console.log(`✅ Бот ${client.user.tag} запущен!`);
 });
 
 client.on('messageCreate', async (message) => {
     if (message.author.bot) return;
-    console.log(`Получено сообщение от ${message.author.tag}`);
     if (message.author.id === TARGET_USER_ID) {
-        console.log(`🎯 Целевой пользователь! Отправляю ответ...`);
-        await message.reply(`⬆️ Пишет дебил. \n> ${message.content}`);
+        await message.reply(`⬆️ Пишет дебил.\n> ${message.content}`);
     }
 });
 
