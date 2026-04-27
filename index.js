@@ -19,19 +19,16 @@ client.once('ready', () => {
 client.on('messageCreate', async (message) => {
     if (message.author.bot) return;
     
-    // ПРОВЕРЯЕМ, ЕСТЬ ЛИ ВЛОЖЕНИЯ (ФОТО)
-    const hasAttachment = message.attachments.size > 0;
+    // Берем только текст, фото игнорируем
+    const text = message.content;
     
-    console.log(`📨 ${message.author.tag}: "${message.content}" [фото: ${hasAttachment}]`);
+    console.log(`📨 ${message.author.tag}: "${text}"`);
     
     try {
         const response = await fetch(WORKER_URL, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ 
-                message: message.content,
-                hasAttachment: hasAttachment
-            })
+            body: JSON.stringify({ message: text })
         });
         
         const data = await response.json();
@@ -42,7 +39,7 @@ client.on('messageCreate', async (message) => {
         }
         
         if (data.reply) {
-            await message.reply(`${data.reply}\n> ${message.content || "[фото]"}`);
+            await message.reply(`${data.reply}\n> ${text}`);
         }
     } catch (err) {
         console.error(`❌ Ошибка: ${err.message}`);
