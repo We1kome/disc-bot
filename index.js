@@ -1,80 +1,58 @@
 const { Client, GatewayIntentBits } = require('discord.js');
 
 const TOKEN = process.env.DISCORD_TOKEN;
-const TARGET_USER_ID = process.env.TARGET_USER_ID;     // Кому шлем оскорбления
-const SECOND_USER_ID = process.env.SECOND_USER_ID;     // Кому шлем комплименты
-const THIRD_USER_ID = process.env.THIRD_USER_ID;       // Кому шлем sigma 💪
+const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY; // Новая переменная!
 
-// === Жесткие оскорбления ===
-const hardInsults = [
-    "{username}, написал долбаеб 🤡",
-    "{username}, иди нахуй, клоун",
-    "{username}, ivanzolo2004 prime",
-    "{username}, ты ебанат конченый",
-    "{username}, съешь говна и угомонись",
-    "{username}, да ты тупой как пробка ебучая",
-    "{username}, че ты несешь, блять?",
-    "{username}, ты ебанат?",
-    "{username}, даун, иди в окно прыгни",
-    "{username}, позор человечества",
-    "{username}, конченый, блять",
-    "{username}, выйди вон, слабоумие",
-    "{username}, боже, какой же ты тупой"
-];
+// ID пользователей
+const TARGET_USER_ID = process.env.TARGET_USER_ID;     // Злой режим
+const SECOND_USER_ID = process.env.SECOND_USER_ID;     // Добрый режим
+const THIRD_USER_ID = process.env.THIRD_USER_ID;       // Sigma режим
 
-// === Противоположные фразы (комплименты/поддержка) ===
-const niceResponses = [
-    "{username}, ты гений мысли 🧠✨",
-    "{username}, продолжай в том же духе!",
-    "{username}, сказал как отрезал 🔥",
-    "{username}, лучший в этом чате ❤️",
-    "{username}, с тобой приятно общаться",
-    "{username}, умница, горжусь 🤝",
-    "{username}, респект за слова",
-    "{username}, прямо в сердце ❤️‍🔥",
-    "{username}, ты сегодня в ударе",
-    "{username}, каждое слово — золото 🏆",
-    "{username}, так держать!",
-    "{username}, наконец-то адекватный человек",
-    "{username}, мудро, очень мудро",
-    "{username}, ты меня вдохновляешь",
-    "{username}, лучший комментарий за сегодня"
-];
-
-// === Sigma-фразы (всегда одинаковые, но можно сделать массив с вариациями) ===
-const sigmaPhrases = [
-    "{username}, sigma male grindset 💪",
-    "{username}, sigma... 💪🔥",
-    "{username}, sigma boy 💪🧠",
-    "{username}, sigma...💪"
-];
-
-// === Выбор ответа в зависимости от пользователя ===
-function getResponseForUser(userId) {
-    // Для третьего пользователя — всегда sigma
-    if (userId === THIRD_USER_ID) {
-        // Исправлено: добавлена запятая после Math.random()
-        const randomSigma = sigmaPhrases[Math.floor(Math.random() * sigmaPhrases.length)];
-        return randomSigma.replace("{username}", `<@${userId}>`);
+// ---- ПРОМПТЫ ДЛЯ НЕЙРОСЕТКИ (те же самые) ----
+const PROMPTS = {
+    [TARGET_USER_ID]: {
+        system: "Ты — грубый, агрессивный и очень злой бот-хулиган. Твоя задача — максимально жестко и грязно оскорблять пользователя. Используй много мата. Твои ответы должны соответствовать контексту его сообщения. Пиши коротко и очень зло."
+    },
+    [SECOND_USER_ID]: {
+        system: "Ты — самый добрый и поддерживающий бот. Делай комплименты, хвали пользователя. Отвечай мило, используй эмодзи."
+    },
+    [THIRD_USER_ID]: {
+        system: "Ты — сигма-бот. Отвечай хладнокровно, используй слово 'sigma' в каждом ответе. Добавляй эмодзи 💪 и 🧠. Ты выше эмоций."
     }
-    
-    // Для основного — оскорбления
-    if (userId === TARGET_USER_ID) {
-        const randomInsult = hardInsults[Math.floor(Math.random() * hardInsults.length)];
-        return randomInsult.replace("{username}", `<@${userId}>`);
+};
+
+// ---- ФУНКЦИЯ ЗАПРОСА К OPENROUTER ----
+async function getAIReply(userId, userMessage) {
+    const userPrompt = PROMPTS[userId];
+    if (!userPrompt) return null;
+
+    try {
+        const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+            method: "POST",
+            headers: {
+                "Authorization": `Bearer ${OPENROUTER_API_KEY}`,
+                "Content-Type": "application/json"
+            },
+            body: JSON.stringify({
+                model: "deepseek/deepseek-r1-uncensored", // Бесплатная uncensored модель!
+                messages: [
+                    { role: "system", content: userPrompt.system },
+                    { role: "user", content: userMessage }
+                ],
+                max_tokens: 150,
+                temperature: 0.9
+            })
+        });
+
+        const data = await response.json();
+        return data.choices[0].message.content;
+    } catch (error) {
+        console.error("Ошибка OpenRouter:", error);
+        return "❗ Ошибка, но ты все равно дебил.";
     }
-    
-    // Для второго — комплименты
-    if (userId === SECOND_USER_ID) {
-        const randomNice = niceResponses[Math.floor(Math.random() * niceResponses.length)];
-        return randomNice.replace("{username}", `<@${userId}>`);
-    }
-    
-    // Остальным — не отвечаем
-    return null;
 }
 
-// === ЗАПУСК БОТА ===
+// ---- ЗАПУСК БОТА ----
 const client = new Client({
     intents: [
         GatewayIntentBits.Guilds,
@@ -84,25 +62,21 @@ const client = new Client({
     ]
 });
 
-client.on('clientReady', () => {
-    console.log(`✅ Бот ${client.user.tag} запущен!`);
-    console.log(`👿 Оскорбления для: ${TARGET_USER_ID || "не задан"}`);
-    console.log(`😇 Комплименты для: ${SECOND_USER_ID || "не задан"}`);
-    console.log(`💪 Sigma для: ${THIRD_USER_ID || "не задан"}`);
-});
-
-client.on('ready', () => {
-    console.log(`✅ Бот ${client.user.tag} запущен!`);
+client.once('ready', () => {
+    console.log(`✅ Бот ${client.user.tag} запущен с OpenRouter!`);
 });
 
 client.on('messageCreate', async (message) => {
     if (message.author.bot) return;
-    
+
     const userId = message.author.id;
-    const response = getResponseForUser(userId);
     
-    if (response) {
-        await message.reply(`${response}\n> ${message.content}`);
+    if (PROMPTS[userId]) {
+        console.log(`🤔 Генерирую ответ для ${message.author.tag}...`);
+        const aiReply = await getAIReply(userId, message.content);
+        if (aiReply) {
+            await message.reply(`${aiReply}\n> ${message.content}`);
+        }
     }
 });
 
