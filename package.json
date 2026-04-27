@@ -3,10 +3,9 @@
   "version": "1.0.0",
   "description": "Discord bot Любимка",
   "type": "module",
-  "main": "bot.js",
+  "main": "index.js",
   "scripts": {
-    "start": "node bot.js",
-    "dev": "node --watch bot.js"
+    "start": "node index.js"
   },
   "dependencies": {
     "discord.js": "^14.14.1"
