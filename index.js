@@ -10,11 +10,10 @@ if (!TOKEN || !OWNER_ID) {
     process.exit(1);
 }
 
-// Настройки
 const settings = {
     enabled: true,
     mode: 'agressive',
-    admins: [], // Список ID админов (кроме владельца)
+    admins: [],
     whitelist: [],
     blacklist: [],
     channels: [],
@@ -33,7 +32,6 @@ const client = new Client({
 
 const messageHistory = new Map();
 
-// Проверка прав
 function isOwner(userId) {
     return userId === OWNER_ID;
 }
@@ -42,7 +40,6 @@ function isAdmin(userId) {
     return userId === OWNER_ID || settings.admins.includes(userId);
 }
 
-// Все команды
 const commands = [
     new SlashCommandBuilder()
         .setName('mode')
@@ -115,10 +112,9 @@ const commands = [
         .addUserOption(option =>
             option.setName('user').setDescription('Пользователь').setRequired(false)),
     
-    // КОМАНДЫ УПРАВЛЕНИЯ АДМИНАМИ — только для владельца
     new SlashCommandBuilder()
-        .setName('admin')
-        .setDescription('🔒 Управление админами (ТОЛЬКО ВЛАДЕЛЕЦ)')
+        .setName('loveadmin')
+        .setDescription('🔒 Управление админами бота')
         .addStringOption(option =>
             option.setName('action')
                 .setDescription('Действие')
@@ -135,7 +131,11 @@ const commands = [
         .setName('custom')
         .setDescription('Кастомный промпт для нейтрального режима')
         .addStringOption(option =>
-            option.setName('text').setDescription('Текст (пусто=сброс)').setRequired(false))
+            option.setName('text').setDescription('Текст (пусто=сброс)').setRequired(false)),
+    
+    new SlashCommandBuilder()
+        .setName('help')
+        .setDescription('Список всех команд бота')
 ].map(cmd => cmd.toJSON());
 
 const rest = new REST({ version: '10' }).setToken(TOKEN);
@@ -153,15 +153,14 @@ client.on('ready', () => {
     console.log(`👑 Владелец: ${OWNER_ID}`);
 });
 
-// Обработчик команд
 client.on('interactionCreate', async (interaction) => {
     if (!interaction.isChatInputCommand()) return;
     
     const { commandName } = interaction;
     console.log(`🔧 /${commandName} от ${interaction.user.username}`);
     
-    // Команда admin — только для владельца
-    if (commandName === 'admin') {
+    // loveadmin — только для владельца
+    if (commandName === 'loveadmin') {
         if (!isOwner(interaction.user.id)) {
             return interaction.reply({ 
                 content: '🔒 Только владелец бота может управлять админами!', 
@@ -176,12 +175,8 @@ client.on('interactionCreate', async (interaction) => {
                 return interaction.reply({ content: '📋 Список админов пуст.', flags: 64 });
             }
             const names = await Promise.all(settings.admins.map(async id => {
-                try { 
-                    const u = await client.users.fetch(id); 
-                    return `- ${u.tag} (${id})`; 
-                } catch { 
-                    return `- ${id}`; 
-                }
+                try { const u = await client.users.fetch(id); return `- ${u.tag} (${id})`; } 
+                catch { return `- ${id}`; }
             }));
             return interaction.reply({ content: `📋 **Админы:**\n${names.join('\n')}`, flags: 64 });
         }
@@ -192,13 +187,13 @@ client.on('interactionCreate', async (interaction) => {
         }
         
         if (user.id === OWNER_ID) {
-            return interaction.reply({ content: '❌ Владелец всегда админ, его нельзя добавить/удалить.', flags: 64 });
+            return interaction.reply({ content: '❌ Владелец всегда админ, нельзя добавить/удалить.', flags: 64 });
         }
         
         if (action === 'add') {
             if (!settings.admins.includes(user.id)) {
                 settings.admins.push(user.id);
-                return interaction.reply({ content: `✅ ${user.tag} теперь админ бота.`, flags: 64 });
+                return interaction.reply({ content: `✅ ${user.tag} теперь админ.`, flags: 64 });
             }
             return interaction.reply({ content: `⚠️ ${user.tag} уже админ.`, flags: 64 });
         }
@@ -209,10 +204,34 @@ client.on('interactionCreate', async (interaction) => {
         }
     }
     
-    // Остальные команды — для админов и владельца
+    // help — доступна всем
+    if (commandName === 'help') {
+        let helpText = '## 📋 Команды бота Любимки\n\n';
+        helpText += '**`/mode`** — сменить режим (агрессивный/адекватный/нейтральный)\n';
+        helpText += '**`/toggle`** — вкл/выкл бота\n';
+        helpText += '**`/chance`** — шанс ответа (0-100%)\n';
+        helpText += '**`/settings`** — показать настройки\n';
+        helpText += '**`/help`** — этот список\n';
+        
+        if (isAdmin(interaction.user.id)) {
+            helpText += '\n**👥 Админские:**\n';
+            helpText += '**`/whitelist`** — белый список\n';
+            helpText += '**`/blacklist`** — чёрный список\n';
+            helpText += '**`/custom`** — кастомный промпт\n';
+        }
+        
+        if (isOwner(interaction.user.id)) {
+            helpText += '\n**🔒 Владелец:**\n';
+            helpText += '**`/loveadmin`** — управление админами\n';
+        }
+        
+        return interaction.reply({ content: helpText, flags: 64 });
+    }
+    
+    // Остальные команды — для админов
     if (!isAdmin(interaction.user.id)) {
         return interaction.reply({ 
-            content: '🚫 У тебя нет прав для управления ботом!', 
+            content: '🚫 Нет прав!', 
             flags: 64 
         });
     }
@@ -237,19 +256,13 @@ client.on('interactionCreate', async (interaction) => {
                 replyChance: settings.replyChance,
                 customPrompt: settings.customPrompt ? 'установлен' : 'нет'
             };
-            await interaction.reply({ 
-                content: `⚙️ **Настройки:**\n\`\`\`json\n${JSON.stringify(info, null, 2)}\n\`\`\``, 
-                flags: 64 
-            });
+            await interaction.reply({ content: `⚙️ **Настройки:**\n\`\`\`json\n${JSON.stringify(info, null, 2)}\n\`\`\``, flags: 64 });
             break;
         }
         
         case 'toggle': {
             settings.enabled = interaction.options.getString('state') === 'on';
-            await interaction.reply({ 
-                content: `✅ Бот **${settings.enabled ? 'включен' : 'выключен'}**`, 
-                flags: 64 
-            });
+            await interaction.reply({ content: `✅ Бот **${settings.enabled ? 'включен' : 'выключен'}**`, flags: 64 });
             break;
         }
         
@@ -272,16 +285,12 @@ client.on('interactionCreate', async (interaction) => {
         case 'custom': {
             const text = interaction.options.getString('text');
             settings.customPrompt = text || null;
-            await interaction.reply({ 
-                content: text ? `✅ Кастомный промпт установлен.` : '✅ Кастомный промпт сброшен.', 
-                flags: 64 
-            });
+            await interaction.reply({ content: text ? '✅ Кастомный промпт установлен.' : '✅ Сброшен.', flags: 64 });
             break;
         }
     }
 });
 
-// Функция для whitelist/blacklist
 async function handleListCommand(interaction, listName) {
     const action = interaction.options.getString('action');
     const user = interaction.options.getUser('user');
@@ -292,8 +301,7 @@ async function handleListCommand(interaction, listName) {
             return interaction.reply({ content: `📋 ${listName}: **пусто**`, flags: 64 });
         }
         const names = await Promise.all(list.map(async id => {
-            try { const u = await client.users.fetch(id); return `- ${u.tag}`; } 
-            catch { return `- ${id}`; }
+            try { const u = await client.users.fetch(id); return `- ${u.tag}`; } catch { return `- ${id}`; }
         }));
         return interaction.reply({ content: `📋 **${listName}:**\n${names.join('\n')}`, flags: 64 });
     }
@@ -312,7 +320,7 @@ async function handleListCommand(interaction, listName) {
             settings[listName].push(user.id);
             return interaction.reply({ content: `✅ ${user.tag} добавлен в ${listName}`, flags: 64 });
         }
-        return interaction.reply({ content: `⚠️ Уже в списке`, flags: 64 });
+        return interaction.reply({ content: '⚠️ Уже в списке', flags: 64 });
     }
     
     if (action === 'remove') {
@@ -321,7 +329,6 @@ async function handleListCommand(interaction, listName) {
     }
 }
 
-// Обработка сообщений
 client.on('messageCreate', async (message) => {
     if (message.content.startsWith('/')) return;
     if (message.author.bot) return;
