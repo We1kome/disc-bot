@@ -12,7 +12,6 @@ const client = new Client({
     ]
 });
 
-// Хранилище последних сообщений по каналам
 const messageHistory = new Map();
 
 client.once('ready', () => {
@@ -30,33 +29,43 @@ client.on('messageCreate', async (message) => {
     
     const channelId = message.channel.id;
     
-    // Инициализируем историю для канала если нужно
     if (!messageHistory.has(channelId)) {
         messageHistory.set(channelId, []);
     }
     
     const history = messageHistory.get(channelId);
     
-    // Добавляем сообщение в историю
+    // Заменяем ID на читаемые ники в сообщении
+    let cleanContent = message.content;
+    const mentionedUsers = message.mentions.users;
+    
+    if (mentionedUsers.size > 0) {
+        console.log(`👥 Найдены упоминания:`);
+        mentionedUsers.forEach((user, id) => {
+            console.log(`  - ID: ${id} -> @${user.username}`);
+            // Заменяем <@ID> и <@!ID> на @username
+            cleanContent = cleanContent.replace(new RegExp(`<@!?${id}>`, 'g'), `@${user.username}`);
+        });
+    }
+    
+    // Добавляем в историю с чистыми никами
     history.push({
         author: message.author.username,
-        content: message.content,
+        content: cleanContent,
         timestamp: Date.now()
     });
     
-    // Храним только последние 10 сообщений
     if (history.length > 10) {
         history.shift();
     }
     
-    console.log(`\n📨 [${message.author.tag}] "${message.content}"`);
-    console.log(`📜 История канала: ${history.length} сообщений`);
+    console.log(`\n📨 [${message.author.username}] (ориг): "${message.content}"`);
+    console.log(`📨 [${message.author.username}] (чист): "${cleanContent}"`);
     
     try {
-        // Отправляем в Worker последние сообщения для контекста
-        const recentMessages = history.slice(-5); // Последние 5 сообщений
+        const recentMessages = history.slice(-5);
         
-        console.log(`📤 Отправка в Worker c ${recentMessages.length} сообщениями контекста`);
+        console.log(`📤 Отправка в Worker с ${recentMessages.length} сообщениями`);
         
         const response = await fetch(WORKER_URL, {
             method: "POST",
@@ -65,7 +74,7 @@ client.on('messageCreate', async (message) => {
                 "User-Agent": "DiscordBot/1.0"
             },
             body: JSON.stringify({ 
-                message: message.content,
+                message: cleanContent,
                 context: recentMessages,
                 currentAuthor: message.author.username
             })
@@ -78,11 +87,17 @@ client.on('messageCreate', async (message) => {
         }
         
         const data = await response.json();
-        console.log(`📦 Ответ Worker:`, JSON.stringify(data).substring(0, 200));
+        console.log(`📦 Ответ Worker: ${JSON.stringify(data).substring(0, 200)}`);
         
         if (data.reply && data.reply.trim() !== "") {
-            // Обрезаем если слишком длинное и обрывается
             let replyText = data.reply;
+            
+            // Заменяем @username обратно на <@ID> для Discord
+            mentionedUsers.forEach((user, id) => {
+                const usernameRegex = new RegExp(`@${user.username.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`, 'gi');
+                replyText = replyText.replace(usernameRegex, `<@${id}>`);
+            });
+            
             if (replyText.length > 500) {
                 replyText = replyText.substring(0, 497) + "...";
             }
@@ -90,7 +105,7 @@ client.on('messageCreate', async (message) => {
             await message.reply(replyText);
             console.log(`✅ Ответ отправлен (${replyText.length} символов)`);
         } else {
-            console.log(`⚠️ Пустой reply от Worker`);
+            console.log(`⚠️ Пустой reply`);
         }
         
     } catch (err) {
