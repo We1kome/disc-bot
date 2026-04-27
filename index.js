@@ -12,10 +12,10 @@ const PROMPTS = {
         system: "Ты — грубый, агрессивный и очень злой бот-хулиган. Отвечай ТОЛЬКО на русском языке. Используй много мата. Пиши коротко — максимум 2 предложения. Никогда не отвечай на английском."
     },
     [SECOND_USER_ID]: {
-        system: "Ты — самый добрый и поддерживающий бот. Делай комплименты, хвали пользователя. Отвечай ТОЛЬКО на русском языке. Используй эмодзи. Пиши коротко. Никогда не отвечай на английском."
+        system: "Ты — самый добрый и поддерживающий бот. Делай комплименты, хвали пользователя. Отвечай ТОЛЬКО на русском языке. Используй эмодзи. Пиши коротко."
     },
     [THIRD_USER_ID]: {
-        system: "Ты — сигма-бот. Отвечай ТОЛЬКО на русском языке. Обязательно используй слово 'сигма' в каждом ответе. Добавляй эмодзи 💪. Пиши коротко — одно предложение. Никогда не отвечай на английском. Пример: 'Сигма 💪, продолжаешь жевать, норм.'"
+        system: "Ты — сигма-бот. Отвечай ТОЛЬКО на русском языке. Обязательно используй слово 'сигма' в каждом ответе. Добавляй эмодзи 💪. Пиши коротко — одно предложение. Пример: 'Сигма 💪, норм совет.'"
     }
 };
 
@@ -34,7 +34,7 @@ async function getAIReply(userId, userMessage) {
 
     for (const model of models) {
         try {
-            console.log(`🔄 Пробую: ${model}`);
+            console.log(`🔄 Пробую модель: ${model}`);
             
             const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
                 method: "POST",
@@ -48,48 +48,49 @@ async function getAIReply(userId, userMessage) {
                         { role: "system", content: userPrompt.system },
                         { role: "user", content: userMessage }
                     ],
-                    max_tokens: 80,
-                    temperature: 0.7
+                    max_tokens: 100,
+                    temperature: 0.8
                 })
             });
 
+            console.log(`📡 Статус ответа: ${response.status} для модели ${model}`);
+
             if (response.status === 429) {
-                console.log(`⚠️ Лимит ${model}, ждём...`);
-                await delay(2000);
+                console.log(`⚠️ Лимит ${model}, жду 3 секунды...`);
+                await delay(3000);
                 continue;
+            }
+
+            if (response.status === 401 || response.status === 403) {
+                console.log(`❌ Ошибка авторизации! Проверь API ключ на OpenRouter`);
+                return getFallbackReply(userId);
             }
 
             if (response.ok) {
                 const data = await response.json();
                 let reply = data.choices[0].message.content;
                 reply = reply.replace(/<\|.*?\|>/g, '').trim();
-                reply = reply.replace(/[\p{L}\s]+$/u, (match) => match);
-                
-                // Если ответ на английском — заменить на запасной
-                if (reply.match(/[a-zA-Z]{5,}/) && !reply.match(/[а-яА-Я]/)) {
-                    console.log(`⚠️ Ответ на английском, заменяю`);
-                    return getFallbackReply(userId);
-                }
-                
-                if (reply.length > 500) reply = reply.substring(0, 500);
-                console.log(`✅ Ответ от ${model}`);
+                console.log(`✅ УСПЕХ! Модель ${model} ответила: "${reply.substring(0, 50)}..."`);
                 return reply;
+            } else {
+                const errorText = await response.text();
+                console.log(`❌ Модель ${model} вернула ошибку ${response.status}: ${errorText.substring(0, 200)}`);
             }
         } catch (err) {
-            console.log(`❌ ${model} ошибка: ${err.message}`);
+            console.log(`❌ Исключение при запросе к ${model}: ${err.message}`);
         }
     }
 
+    console.log(`🔥 ВСЕ МОДЕЛИ НЕ СРАБОТАЛИ! Использую запасные фразы`);
     return getFallbackReply(userId);
 }
 
 function getFallbackReply(userId) {
+    console.log(`📢 Отправляю запасную фразу пользователю ${userId}`);
     const fallbacks = {
         [TARGET_USER_ID]: [
             `<@${userId}>, ты дебил 🤡`,
-            `<@${userId}>, иди нахуй`,
-            `<@${userId}>, даун`,
-            `<@${userId}>, позор`
+            `<@${userId}>, иди нахуй`
         ],
         [SECOND_USER_ID]: [
             `<@${userId}>, ты крутой 🔥`,
@@ -97,10 +98,7 @@ function getFallbackReply(userId) {
         ],
         [THIRD_USER_ID]: [
             `<@${userId}>, сигма 💪`,
-            `<@${userId}>, сигма-бой 💪`,
-            `<@${userId}>, сигма, продолжай 💪`,
-            `Сигма 💪, <@${userId}>`,
-            `<@${userId}>, чистая сигма 💪`
+            `<@${userId}>, сигма-бой 💪`
         ]
     };
     const list = fallbacks[userId] || [`<@${userId}>, привет`];
@@ -118,7 +116,7 @@ const client = new Client({
 
 client.once('ready', () => {
     console.log(`✅ Бот ${client.user.tag} запущен!`);
-    console.log(`📋 Модели: Gemma 4, Llama 3.3, Nemotron`);
+    console.log(`📋 Модели: ${models.join(", ")}`);
 });
 
 client.on('messageCreate', async (message) => {
@@ -127,8 +125,9 @@ client.on('messageCreate', async (message) => {
     const userId = message.author.id;
     
     if (PROMPTS[userId]) {
-        console.log(`🤔 Сообщение от ${message.author.tag}: "${message.content.substring(0, 30)}"`);
+        console.log(`\n📨 НОВОЕ СООБЩЕНИЕ от ${message.author.tag}: "${message.content}"`);
         const aiReply = await getAIReply(userId, message.content);
+        console.log(`💬 ИТОГОВЫЙ ОТВЕТ: "${aiReply}"\n`);
         await message.reply(`${aiReply}\n> ${message.content}`);
     }
 });
