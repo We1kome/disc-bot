@@ -20,7 +20,7 @@ client.on('ready', () => {
 client.on('messageCreate', async (message) => {
     if (message.author.bot) return;
     if (message.author.id === TARGET_USER_ID) {
-        await message.reply(`⬆️ Пишет дебил. \n> ${message.content}`);
+        await message.reply(`⬆️ Сказал долбаеб! \n> ${message.content}`);
     }
 });
 
