@@ -43,20 +43,18 @@ const niceResponses = [
 
 // === Sigma-фразы (всегда одинаковые, но можно сделать массив с вариациями) ===
 const sigmaPhrases = [
-    "{username}, sigma... 💪",
     "{username}, sigma male grindset 💪",
     "{username}, sigma... 💪🔥",
     "{username}, sigma boy 💪🧠",
-    "{username}, sigma... и точка 💪"
+    "{username}, sigma...💪"
 ];
 
 // === Выбор ответа в зависимости от пользователя ===
 function getResponseForUser(userId) {
     // Для третьего пользователя — всегда sigma
     if (userId === THIRD_USER_ID) {
-        // Если хочешь всегда одну фразу — используй sigmaPhrases[0]
-        // Или случайную из массива:
-        const randomSigma = sigmaPhrases[Math.floor(Math.random() sigmaPhrases.length)];
+        // Исправлено: добавлена запятая после Math.random()
+        const randomSigma = sigmaPhrases[Math.floor(Math.random() * sigmaPhrases.length)];
         return randomSigma.replace("{username}", `<@${userId}>`);
     }
     
