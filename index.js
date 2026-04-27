@@ -1,146 +1,170 @@
-export default {
-  async fetch(request, env) {
-    if (request.method !== "POST") {
-      return new Response("Worker is running", { status: 200 });
-    }
+import { Client, GatewayIntentBits, REST, Routes, SlashCommandBuilder } from 'discord.js';
 
-    try {
-      const body = await request.json();
-      const userMessage = body.message;
-      const context = body.context || [];
-      const currentAuthor = body.currentAuthor || "пользователь";
-      const mode = body.mode || "agressive";
-      const customPrompt = body.customPrompt || null;
+const TOKEN = process.env.DISCORD_TOKEN;
+const CLIENT_ID = process.env.CLIENT_ID || "1498208678723977216";
+const OWNER_ID = process.env.OWNER_ID;
+const WORKER_URL = "https://loverbot.vladikkotik3.workers.dev";
 
-      console.log(`📨 [${currentAuthor}] режим:${mode}: "${userMessage}"`);
-      
-      if (!userMessage || userMessage.trim() === "") {
-        return new Response(JSON.stringify({ reply: null }), {
-          headers: { "Content-Type": "application/json" }
-        });
-      }
+if (!TOKEN || !OWNER_ID) {
+    console.error('❌ Нужны переменные: DISCORD_TOKEN, OWNER_ID');
+    process.exit(1);
+}
 
-      const mentions = userMessage.match(/@[\w\/.]+/g) || [];
-      const isTaggingSomeone = mentions.length > 0;
-      const victims = mentions.join(' ');
-      
-      let contextText = "";
-      if (context.length > 1) {
-        contextText = "Контекст:\n";
-        context.forEach((msg) => {
-          contextText += `- ${msg.author}: "${msg.content}"\n`;
-        });
-      }
-
-      let systemPrompt;
-      let userPrompt;
-      
-      switch (mode) {
-        case "agressive":
-          // Злой гопник
-          systemPrompt = `Ты — злой гопник "Любимка". Оскорбляй людей матом на русском. 2 предложения.`;
-          userPrompt = isTaggingSomeone 
-            ? `Оскорби ${victims} за: "${userMessage}"${contextText ? '\n' + contextText : ''}`
-            : `Оскорби автора за: "${userMessage}"`;
-          break;
-          
-        case "normal":
-          // Адекватный помощник
-          systemPrompt = `Ты — дружелюбный и полезный ассистент "Любимка". Отвечай вежливо, развёрнуто, помогай с вопросами. Без мата и оскорблений.`;
-          userPrompt = `Пользователь ${currentAuthor} написал: "${userMessage}"${contextText ? '\nКонтекст:\n' + contextText : ''}\n\nОтветь полезно и по делу.`;
-          break;
-          
-        case "neutral":
-          // Нейтральный или кастомный
-          if (customPrompt) {
-            systemPrompt = customPrompt;
-          } else {
-            systemPrompt = `Ты — нейтральный собеседник "Любимка". Общайся спокойно, без агрессии, но и без излишней вежливости.`;
-          }
-          userPrompt = `Сообщение: "${userMessage}"${contextText ? '\n' + contextText : ''}`;
-          break;
-          
-        default:
-          systemPrompt = `Ты — злой гопник. Оскорбляй матом.`;
-          userPrompt = `Оскорби за: "${userMessage}"`;
-      }
-
-      let reply = null;
-      
-      for (let attempt = 1; attempt <= 3; attempt++) {
-        try {
-          const aiResponse = await env.AI.run('@cf/meta/llama-3.3-70b-instruct-fp8-fast', {
-            messages: [
-              { role: "system", content: systemPrompt },
-              { role: "user", content: userPrompt }
-            ],
-            temperature: mode === "normal" ? 0.7 : 1.2,
-            max_tokens: mode === "normal" ? 300 : 200,
-            top_p: 0.9,
-            frequency_penalty: mode === "agressive" ? 0.8 : 0.3,
-            presence_penalty: mode === "agressive" ? 0.8 : 0.3
-          });
-
-          let result = aiResponse.response || "";
-          
-          result = result
-            .replace(/<\|.*?\|>/g, '')
-            .replace(/```[\s\S]*?```/g, '')
-            .replace(/`[^`]*`/g, '')
-            .replace(/[^\u0400-\u04FF\u0020-\u002F\u003A-\u0040\u005B-\u0060\u007B-\u007E\u00AB\u00BB\u0401\u0451]/g, '')
-            .replace(/@[\w\/.]+/g, '')
-            .replace(/\s+/g, ' ')
-            .trim();
-          
-          // Для агрессивного режима добавляем тег
-          if (mode === "agressive" && isTaggingSomeone && victims) {
-            if (!result.startsWith(victims)) {
-              result = `${victims} ${result.charAt(0).toLowerCase() + result.slice(1)}`;
-            }
-          }
-          
-          const sentences = result.match(/[^.!?]+[.!?]+/g);
-          if (sentences && sentences.length > 0) {
-            result = sentences.slice(0, mode === "normal" ? 4 : 2).join(' ').trim();
-          }
-          
-          if (result.length > 0 && !/[.!?]$/.test(result)) {
-            result += mode === "normal" ? '.' : '!';
-          }
-          
-          if (result.length >= 10) {
-            reply = result;
-            break;
-          }
-          
-        } catch (aiError) {
-          console.error(`⚠️ Попытка ${attempt}: ${aiError.message}`);
-        }
-      }
-
-      if (!reply) {
-        if (mode === "normal") {
-          reply = "Извини, я не смог обработать твой запрос. Попробуй переформулировать вопрос!";
-        } else if (mode === "agressive") {
-          reply = isTaggingSomeone 
-            ? `${victims} ты уёбище, иди нахуй!` 
-            : "Сам ты уёбище, иди нахуй!";
-        } else {
-          reply = "Не могу ответить сейчас, попробуй позже.";
-        }
-      }
-
-      console.log(`💬 [${mode}] Ответ: "${reply}"`);
-      
-      return new Response(JSON.stringify({ reply }), {
-        headers: { "Content-Type": "application/json" }
-      });
-
-    } catch (error) {
-      console.error(`💥 Ошибка: ${error.message}`);
-      return new Response(JSON.stringify({ reply: "Произошла ошибка, попробуй позже." }), {
-        headers: { "Content-Type": "application/json" }
-      });
-    }
-  }
+const settings = {
+    enabled: true,
+    mode: 'agressive', // agressive, normal, neutral
+    whitelist: [],
+    blacklist: [],
+    channels: [],
+    replyChance: 100,
+    customPrompt: null
 };
+
+const client = new Client({
+    intents: [
+        GatewayIntentBits.Guilds,
+        GatewayIntentBits.GuildMessages,
+        GatewayIntentBits.MessageContent,
+        GatewayIntentBits.DirectMessages
+    ]
+});
+
+const messageHistory = new Map();
+
+// Команды
+const commands = [
+    new SlashCommandBuilder()
+        .setName('mode')
+        .setDescription('Сменить режим бота')
+        .addStringOption(option =>
+            option.setName('type')
+                .setDescription('Режим')
+                .setRequired(true)
+                .addChoices(
+                    { name: '😡 Агрессивный (гопник)', value: 'agressive' },
+                    { name: '😊 Адекватный (помощник)', value: 'normal' },
+                    { name: '😐 Нейтральный (собеседник)', value: 'neutral' }
+                )),
+    
+    new SlashCommandBuilder()
+        .setName('settings')
+        .setDescription('Показать настройки'),
+    
+    new SlashCommandBuilder()
+        .setName('toggle')
+        .setDescription('Включить/выключить')
+        .addStringOption(option =>
+            option.setName('state')
+                .setDescription('Состояние')
+                .setRequired(true)
+                .addChoices(
+                    { name: '✅ Включить', value: 'on' },
+                    { name: '❌ Выключить', value: 'off' }
+                )),
+    
+    new SlashCommandBuilder()
+        .setName('chance')
+        .setDescription('Шанс ответа (0-100%)')
+        .addIntegerOption(option =>
+            option.setName('percent')
+                .setDescription('Процент')
+                .setRequired(true)
+                .setMinValue(0)
+                .setMaxValue(100))
+].map(cmd => cmd.toJSON());
+
+const rest = new REST({ version: '10' }).setToken(TOKEN);
+
+client.once('ready', async () => {
+    console.log(`✅ Бот ${client.user.tag} запущен!`);
+    
+    try {
+        await rest.put(Routes.applicationCommands(CLIENT_ID), { body: commands });
+        console.log(`✅ Команды зарегистрированы!`);
+    } catch (error) {
+        console.error(`❌ Ошибка команд: ${error.message}`);
+    }
+});
+
+client.on('interactionCreate', async (interaction) => {
+    if (!interaction.isChatInputCommand()) return;
+    if (interaction.user.id !== OWNER_ID) {
+        return interaction.reply({ content: '🚫 Только владелец!', ephemeral: true });
+    }
+    
+    const { commandName } = interaction;
+    
+    if (commandName === 'mode') {
+        settings.mode = interaction.options.getString('type');
+        const names = { agressive: '😡 Гопник', normal: '😊 Помощник', neutral: '😐 Собеседник' };
+        await interaction.reply({ content: `✅ Режим: **${names[settings.mode]}**`, ephemeral: true });
+    } else if (commandName === 'settings') {
+        await interaction.reply({ content: `⚙️ Настройки:\n\`\`\`json\n${JSON.stringify(settings, null, 2)}\n\`\`\``, ephemeral: true });
+    } else if (commandName === 'toggle') {
+        settings.enabled = interaction.options.getString('state') === 'on';
+        await interaction.reply({ content: `✅ Бот **${settings.enabled ? 'включен' : 'выключен'}**`, ephemeral: true });
+    } else if (commandName === 'chance') {
+        settings.replyChance = interaction.options.getInteger('percent');
+        await interaction.reply({ content: `✅ Шанс: **${settings.replyChance}%**`, ephemeral: true });
+    }
+});
+
+client.on('messageCreate', async (message) => {
+    if (message.author.bot) return;
+    if (!settings.enabled) return;
+    if (message.content.includes(";")) return;
+    if (Math.random() * 100 > settings.replyChance) return;
+    if (settings.blacklist.includes(message.author.id)) return;
+    if (settings.whitelist.length > 0 && !settings.whitelist.includes(message.author.id)) return;
+    if (settings.channels.length > 0 && !settings.channels.includes(message.channel.id)) return;
+    
+    const channelId = message.channel.id;
+    if (!messageHistory.has(channelId)) messageHistory.set(channelId, []);
+    
+    const history = messageHistory.get(channelId);
+    let cleanContent = message.content;
+    const mentionedUsers = message.mentions.users;
+    
+    if (mentionedUsers.size > 0) {
+        mentionedUsers.forEach((user, id) => {
+            cleanContent = cleanContent.replace(new RegExp(`<@!?${id}>`, 'g'), `@${user.username}`);
+        });
+    }
+    
+    history.push({ author: message.author.username, content: cleanContent, timestamp: Date.now() });
+    if (history.length > 10) history.shift();
+    
+    console.log(`📨 [${message.author.username}]: "${cleanContent}"`);
+    
+    try {
+        const response = await fetch(WORKER_URL, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                message: cleanContent,
+                context: history.slice(-5),
+                currentAuthor: message.author.username,
+                mode: settings.mode,
+                customPrompt: settings.customPrompt
+            })
+        });
+        
+        const data = await response.json();
+        
+        if (data.reply) {
+            let replyText = data.reply;
+            mentionedUsers.forEach((user, id) => {
+                const escaped = user.username.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                replyText = replyText.replace(new RegExp(`@${escaped}`, 'gi'), `<@${id}>`);
+            });
+            
+            if (replyText.length > 500) replyText = replyText.substring(0, 497) + "...";
+            await message.reply(replyText);
+            console.log(`✅ Ответ отправлен`);
+        }
+    } catch (err) {
+        console.error(`💥 Ошибка: ${err.message}`);
+    }
+});
+
+client.login(TOKEN);
