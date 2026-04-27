@@ -3,22 +3,6 @@ const { Client, GatewayIntentBits } = require('discord.js');
 const TOKEN = process.env.DISCORD_TOKEN;
 const WORKER_URL = "https://loverbot.vladikkotik3.workers.dev";
 
-// Запасные оскорбления (если Worker не ответит)
-const FALLBACKS = [
-    "<@{id}>, ты долбаеб конченый 🤡",
-    "<@{id}>, иди нахуй, ебанат",
-    "<@{id}>, даун ебучий, позор",
-    "<@{id}>, соси хуй, уебок",
-    "<@{id}>, пидор, закрой ебало",
-    "Отъебись, <@{id}>, конченый",
-    "<@{id}>, ебаный даун, иди лечись"
-];
-
-function getFallback(userId) {
-    const randomIndex = Math.floor(Math.random() * FALLBACKS.length);
-    return FALLBACKS[randomIndex].replace("{id}", userId);
-}
-
 const client = new Client({
     intents: [
         GatewayIntentBits.Guilds,
@@ -30,15 +14,11 @@ const client = new Client({
 
 client.once('ready', () => {
     console.log(`✅ Бот ${client.user.tag} запущен!`);
-    console.log(`🔗 Worker: ${WORKER_URL}`);
-    console.log(`👿 РЕЖИМ: ОСКОРБЛЯЕТ ВСЕХ ПОЛЬЗОВАТЕЛЕЙ`);
+    console.log(`🤖 Нейросеть генерирует уникальные оскорбления`); 
 });
 
 client.on('messageCreate', async (message) => {
-    // Игнорируем сообщения самого бота
     if (message.author.bot) return;
-    
-    const userId = message.author.id;
     
     console.log(`📨 ${message.author.tag}: "${message.content}"`);
     
@@ -54,11 +34,11 @@ client.on('messageCreate', async (message) => {
         if (data.reply) {
             await message.reply(`${data.reply}\n> ${message.content}`);
         } else {
-            await message.reply(`${getFallback(userId)}\n> ${message.content}`);
+            await message.reply(`Иди нахуй\n> ${message.content}`);
         }
     } catch (err) {
         console.error(`❌ Ошибка: ${err.message}`);
-        await message.reply(`${getFallback(userId)}\n> ${message.content}`);
+        await message.reply(`Пошел нахуй\n> ${message.content}`);
     }
 });
 
