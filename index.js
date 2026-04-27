@@ -1,10 +1,11 @@
 const { Client, GatewayIntentBits } = require('discord.js');
 
 const TOKEN = process.env.DISCORD_TOKEN;
-const TARGET_USER_ID = process.env.TARGET_USER_ID;
+const TARGET_USER_ID = process.env.TARGET_USER_ID;     // Кому шлем оскорбления
+const SECOND_USER_ID = process.env.SECOND_USER_ID;     // Кому шлем комплименты
 
-// Жесткие оскорбления с обращением к пользователю
-const directInsults = [
+// === Жесткие оскорбления ===
+const hardInsults = [
     "{username}, написал долбаеб 🤡",
     "{username}, иди нахуй, клоун",
     "{username}, ivanzolo2004 prime",
@@ -20,6 +21,42 @@ const directInsults = [
     "{username}, боже, какой же ты тупой"
 ];
 
+// === Противоположные фразы (комплименты/поддержка) ===
+const niceResponses = [
+    "{username}, ты гений мысли 🧠✨",
+    "{username}, продолжай в том же духе!",
+    "{username}, сказал как отрезал 🔥",
+    "{username}, лучший в этом чате ❤️",
+    "{username}, с тобой приятно общаться",
+    "{username}, умница, горжусь 🤝",
+    "{username}, респект за слова",
+    "{username}, прямо в сердце ❤️‍🔥",
+    "{username}, ты сегодня в ударе",
+    "{username}, каждое слово — золото 🏆",
+    "{username}, так держать!",
+    "{username}, наконец-то адекватный человек",
+    "{username}, мудро, очень мудро",
+    "{username}, ты меня вдохновляешь",
+    "{username}, лучший комментарий за сегодня"
+];
+
+// === Выбор ответа в зависимости от пользователя ===
+function getResponseForUser(userId, username) {
+    let phrasesList;
+    
+    if (userId === TARGET_USER_ID) {
+        phrasesList = hardInsults;      // Оскорбления
+    } else if (userId === SECOND_USER_ID) {
+        phrasesList = niceResponses;    // Комплименты
+    } else {
+        return null;                    // Остальным не отвечаем
+    }
+    
+    const randomPhrase = phrasesList[Math.floor(Math.random() * phrasesList.length)];
+    return randomPhrase.replace("{username}", `<@${userId}>`);
+}
+
+// === ЗАПУСК БОТА ===
 const client = new Client({
     intents: [
         GatewayIntentBits.Guilds,
@@ -30,27 +67,23 @@ const client = new Client({
 });
 
 client.on('clientReady', () => {
-    console.log(`✅ Бот ${client.user.tag} запущен и следит за другом!`);
+    console.log(`✅ Бот ${client.user.tag} запущен!`);
+    console.log(`👿 Оскорбления для: ${TARGET_USER_ID || "не задан"}`);
+    console.log(`😇 Комплименты для: ${SECOND_USER_ID || "не задан"}`);
 });
 
-// Для совместимости со старой версией
 client.on('ready', () => {
     console.log(`✅ Бот ${client.user.tag} запущен!`);
 });
 
 client.on('messageCreate', async (message) => {
-    // Игнорируем сообщения самого бота
     if (message.author.bot) return;
     
-    // Если автор — наша цель
-    if (message.author.id === TARGET_USER_ID) {
-        // Выбираем случайное оскорбление
-        const randomInsult = directInsults[Math.floor(Math.random() * directInsults.length)];
-        // Подставляем упоминание пользователя
-        const finalMessage = randomInsult.replace("{username}", `<@${message.author.id}>`);
-        
-        // Отправляем ответ с цитатой
-        await message.reply(`${finalMessage}\n> ${message.content}`);
+    const userId = message.author.id;
+    const response = getResponseForUser(userId);
+    
+    if (response) {
+        await message.reply(`${response}\n> ${message.content}`);
     }
 });
 
