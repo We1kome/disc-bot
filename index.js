@@ -10,9 +10,11 @@ if (!TOKEN || !OWNER_ID) {
     process.exit(1);
 }
 
+// Настройки
 const settings = {
     enabled: true,
     mode: 'agressive',
+    admins: [], // Список ID админов (кроме владельца)
     whitelist: [],
     blacklist: [],
     channels: [],
@@ -31,6 +33,16 @@ const client = new Client({
 
 const messageHistory = new Map();
 
+// Проверка прав
+function isOwner(userId) {
+    return userId === OWNER_ID;
+}
+
+function isAdmin(userId) {
+    return userId === OWNER_ID || settings.admins.includes(userId);
+}
+
+// Все команды
 const commands = [
     new SlashCommandBuilder()
         .setName('mode')
@@ -42,16 +54,16 @@ const commands = [
                 .addChoices(
                     { name: '😡 Агрессивный (гопник)', value: 'agressive' },
                     { name: '😊 Адекватный (помощник)', value: 'normal' },
-                    { name: '😐 Нейтральный (собеседник)', value: 'neutral' }
+                    { name: '😐 Нейтральный', value: 'neutral' }
                 )),
     
     new SlashCommandBuilder()
         .setName('settings')
-        .setDescription('Показать настройки'),
+        .setDescription('Показать настройки бота'),
     
     new SlashCommandBuilder()
         .setName('toggle')
-        .setDescription('Включить/выключить')
+        .setDescription('Включить или выключить бота')
         .addStringOption(option =>
             option.setName('state')
                 .setDescription('Состояние')
@@ -69,85 +81,249 @@ const commands = [
                 .setDescription('Процент')
                 .setRequired(true)
                 .setMinValue(0)
-                .setMaxValue(100))
+                .setMaxValue(100)),
+    
+    new SlashCommandBuilder()
+        .setName('whitelist')
+        .setDescription('Белый список — кому отвечать')
+        .addStringOption(option =>
+            option.setName('action')
+                .setDescription('Действие')
+                .setRequired(true)
+                .addChoices(
+                    { name: '➕ Добавить', value: 'add' },
+                    { name: '➖ Удалить', value: 'remove' },
+                    { name: '🗑 Очистить', value: 'clear' },
+                    { name: '📋 Показать', value: 'show' }
+                ))
+        .addUserOption(option =>
+            option.setName('user').setDescription('Пользователь').setRequired(false)),
+    
+    new SlashCommandBuilder()
+        .setName('blacklist')
+        .setDescription('Чёрный список — кого игнорить')
+        .addStringOption(option =>
+            option.setName('action')
+                .setDescription('Действие')
+                .setRequired(true)
+                .addChoices(
+                    { name: '➕ Добавить', value: 'add' },
+                    { name: '➖ Удалить', value: 'remove' },
+                    { name: '🗑 Очистить', value: 'clear' },
+                    { name: '📋 Показать', value: 'show' }
+                ))
+        .addUserOption(option =>
+            option.setName('user').setDescription('Пользователь').setRequired(false)),
+    
+    // КОМАНДЫ УПРАВЛЕНИЯ АДМИНАМИ — только для владельца
+    new SlashCommandBuilder()
+        .setName('admin')
+        .setDescription('🔒 Управление админами (ТОЛЬКО ВЛАДЕЛЕЦ)')
+        .addStringOption(option =>
+            option.setName('action')
+                .setDescription('Действие')
+                .setRequired(true)
+                .addChoices(
+                    { name: '➕ Добавить админа', value: 'add' },
+                    { name: '➖ Удалить админа', value: 'remove' },
+                    { name: '📋 Список админов', value: 'list' }
+                ))
+        .addUserOption(option =>
+            option.setName('user').setDescription('Пользователь').setRequired(false)),
+    
+    new SlashCommandBuilder()
+        .setName('custom')
+        .setDescription('Кастомный промпт для нейтрального режима')
+        .addStringOption(option =>
+            option.setName('text').setDescription('Текст (пусто=сброс)').setRequired(false))
 ].map(cmd => cmd.toJSON());
 
 const rest = new REST({ version: '10' }).setToken(TOKEN);
 
-// Регистрируем команды ПЕРЕД запуском
 try {
     console.log('🔄 Регистрация команд...');
     await rest.put(Routes.applicationCommands(CLIENT_ID), { body: commands });
     console.log('✅ Команды зарегистрированы!');
 } catch (error) {
-    console.error('❌ Ошибка регистрации:', error.message);
+    console.error('❌ Ошибка:', error.message);
 }
 
 client.on('ready', () => {
     console.log(`✅ Бот ${client.user.tag} запущен!`);
+    console.log(`👑 Владелец: ${OWNER_ID}`);
 });
 
-// ВАЖНО: обработчик interactionCreate
+// Обработчик команд
 client.on('interactionCreate', async (interaction) => {
-    // Только слеш-команды
     if (!interaction.isChatInputCommand()) return;
     
-    console.log(`🔧 Команда: /${interaction.commandName} от ${interaction.user.username}`);
+    const { commandName } = interaction;
+    console.log(`🔧 /${commandName} от ${interaction.user.username}`);
     
-    // Проверка владельца
-    if (interaction.user.id !== OWNER_ID) {
+    // Команда admin — только для владельца
+    if (commandName === 'admin') {
+        if (!isOwner(interaction.user.id)) {
+            return interaction.reply({ 
+                content: '🔒 Только владелец бота может управлять админами!', 
+                flags: 64 
+            });
+        }
+        
+        const action = interaction.options.getString('action');
+        
+        if (action === 'list') {
+            if (settings.admins.length === 0) {
+                return interaction.reply({ content: '📋 Список админов пуст.', flags: 64 });
+            }
+            const names = await Promise.all(settings.admins.map(async id => {
+                try { 
+                    const u = await client.users.fetch(id); 
+                    return `- ${u.tag} (${id})`; 
+                } catch { 
+                    return `- ${id}`; 
+                }
+            }));
+            return interaction.reply({ content: `📋 **Админы:**\n${names.join('\n')}`, flags: 64 });
+        }
+        
+        const user = interaction.options.getUser('user');
+        if (!user) {
+            return interaction.reply({ content: '❌ Укажи пользователя!', flags: 64 });
+        }
+        
+        if (user.id === OWNER_ID) {
+            return interaction.reply({ content: '❌ Владелец всегда админ, его нельзя добавить/удалить.', flags: 64 });
+        }
+        
+        if (action === 'add') {
+            if (!settings.admins.includes(user.id)) {
+                settings.admins.push(user.id);
+                return interaction.reply({ content: `✅ ${user.tag} теперь админ бота.`, flags: 64 });
+            }
+            return interaction.reply({ content: `⚠️ ${user.tag} уже админ.`, flags: 64 });
+        }
+        
+        if (action === 'remove') {
+            settings.admins = settings.admins.filter(id => id !== user.id);
+            return interaction.reply({ content: `✅ ${user.tag} удалён из админов.`, flags: 64 });
+        }
+    }
+    
+    // Остальные команды — для админов и владельца
+    if (!isAdmin(interaction.user.id)) {
         return interaction.reply({ 
-            content: '🚫 Только владелец может использовать команды!', 
-            ephemeral: true 
+            content: '🚫 У тебя нет прав для управления ботом!', 
+            flags: 64 
         });
     }
     
-    const { commandName } = interaction;
-    
-    if (commandName === 'mode') {
-        const mode = interaction.options.getString('type');
-        settings.mode = mode;
-        const names = { 
-            agressive: '😡 Агрессивный (гопник)', 
-            normal: '😊 Адекватный (помощник)', 
-            neutral: '😐 Нейтральный (собеседник)' 
-        };
-        await interaction.reply({ 
-            content: `✅ Режим изменён на: **${names[mode]}**`, 
-            ephemeral: true 
-        });
-        console.log(`🔄 Режим → ${mode}`);
-    } 
-    else if (commandName === 'settings') {
-        await interaction.reply({ 
-            content: `⚙️ **Настройки:**\n\`\`\`json\n${JSON.stringify(settings, null, 2)}\n\`\`\``, 
-            ephemeral: true 
-        });
-    } 
-    else if (commandName === 'toggle') {
-        settings.enabled = interaction.options.getString('state') === 'on';
-        await interaction.reply({ 
-            content: `✅ Бот **${settings.enabled ? 'включен' : 'выключен'}**`, 
-            ephemeral: true 
-        });
-    } 
-    else if (commandName === 'chance') {
-        settings.replyChance = interaction.options.getInteger('percent');
-        await interaction.reply({ 
-            content: `✅ Шанс ответа: **${settings.replyChance}%**`, 
-            ephemeral: true 
-        });
+    switch (commandName) {
+        case 'mode': {
+            const mode = interaction.options.getString('type');
+            settings.mode = mode;
+            const names = { agressive: '😡 Агрессивный', normal: '😊 Адекватный', neutral: '😐 Нейтральный' };
+            await interaction.reply({ content: `✅ Режим: **${names[mode]}**`, flags: 64 });
+            break;
+        }
+        
+        case 'settings': {
+            const info = {
+                enabled: settings.enabled,
+                mode: settings.mode,
+                admins: settings.admins.length,
+                whitelist: settings.whitelist.length,
+                blacklist: settings.blacklist.length,
+                channels: settings.channels.length,
+                replyChance: settings.replyChance,
+                customPrompt: settings.customPrompt ? 'установлен' : 'нет'
+            };
+            await interaction.reply({ 
+                content: `⚙️ **Настройки:**\n\`\`\`json\n${JSON.stringify(info, null, 2)}\n\`\`\``, 
+                flags: 64 
+            });
+            break;
+        }
+        
+        case 'toggle': {
+            settings.enabled = interaction.options.getString('state') === 'on';
+            await interaction.reply({ 
+                content: `✅ Бот **${settings.enabled ? 'включен' : 'выключен'}**`, 
+                flags: 64 
+            });
+            break;
+        }
+        
+        case 'chance': {
+            settings.replyChance = interaction.options.getInteger('percent');
+            await interaction.reply({ content: `✅ Шанс ответа: **${settings.replyChance}%**`, flags: 64 });
+            break;
+        }
+        
+        case 'whitelist': {
+            await handleListCommand(interaction, 'whitelist');
+            break;
+        }
+        
+        case 'blacklist': {
+            await handleListCommand(interaction, 'blacklist');
+            break;
+        }
+        
+        case 'custom': {
+            const text = interaction.options.getString('text');
+            settings.customPrompt = text || null;
+            await interaction.reply({ 
+                content: text ? `✅ Кастомный промпт установлен.` : '✅ Кастомный промпт сброшен.', 
+                flags: 64 
+            });
+            break;
+        }
     }
 });
 
-// Обработка обычных сообщений
-client.on('messageCreate', async (message) => {
-    // Игнорируем команды (они обрабатываются в interactionCreate)
-    if (message.content.startsWith('/')) {
-        console.log(`⏭ Пропуск команды: ${message.content}`);
-        return;
+// Функция для whitelist/blacklist
+async function handleListCommand(interaction, listName) {
+    const action = interaction.options.getString('action');
+    const user = interaction.options.getUser('user');
+    
+    if (action === 'show') {
+        const list = settings[listName];
+        if (list.length === 0) {
+            return interaction.reply({ content: `📋 ${listName}: **пусто**`, flags: 64 });
+        }
+        const names = await Promise.all(list.map(async id => {
+            try { const u = await client.users.fetch(id); return `- ${u.tag}`; } 
+            catch { return `- ${id}`; }
+        }));
+        return interaction.reply({ content: `📋 **${listName}:**\n${names.join('\n')}`, flags: 64 });
     }
     
+    if (action === 'clear') {
+        settings[listName] = [];
+        return interaction.reply({ content: `✅ ${listName} очищен`, flags: 64 });
+    }
+    
+    if (!user) {
+        return interaction.reply({ content: '❌ Укажи пользователя', flags: 64 });
+    }
+    
+    if (action === 'add') {
+        if (!settings[listName].includes(user.id)) {
+            settings[listName].push(user.id);
+            return interaction.reply({ content: `✅ ${user.tag} добавлен в ${listName}`, flags: 64 });
+        }
+        return interaction.reply({ content: `⚠️ Уже в списке`, flags: 64 });
+    }
+    
+    if (action === 'remove') {
+        settings[listName] = settings[listName].filter(id => id !== user.id);
+        return interaction.reply({ content: `✅ ${user.tag} удалён из ${listName}`, flags: 64 });
+    }
+}
+
+// Обработка сообщений
+client.on('messageCreate', async (message) => {
+    if (message.content.startsWith('/')) return;
     if (message.author.bot) return;
     if (!settings.enabled) return;
     if (message.content.includes(";")) return;
