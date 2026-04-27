@@ -12,28 +12,51 @@ const client = new Client({
     ]
 });
 
+// Хранилище последних сообщений по каналам
+const messageHistory = new Map();
+
 client.once('ready', () => {
     console.log(`✅ Бот ${client.user.tag} запущен!`);
     console.log(`🔄 Worker URL: ${WORKER_URL}`);
 });
 
 client.on('messageCreate', async (message) => {
-    // Игнорируем ботов
-    if (message.author.bot) {
-        console.log(`🤖 Игнор бота: ${message.author.tag}`);
+    if (message.author.bot) return;
+    
+    if (message.content.includes(";")) {
+        console.log(`🚫 Игнор (;): "${message.content}"`);
         return;
     }
     
-    // Игнорируем сообщения с ;
-    if (message.content.includes(";")) {
-        console.log(`🚫 Игнор (содержит ;): "${message.content}" от ${message.author.tag}`);
-        return;
+    const channelId = message.channel.id;
+    
+    // Инициализируем историю для канала если нужно
+    if (!messageHistory.has(channelId)) {
+        messageHistory.set(channelId, []);
+    }
+    
+    const history = messageHistory.get(channelId);
+    
+    // Добавляем сообщение в историю
+    history.push({
+        author: message.author.username,
+        content: message.content,
+        timestamp: Date.now()
+    });
+    
+    // Храним только последние 10 сообщений
+    if (history.length > 10) {
+        history.shift();
     }
     
     console.log(`\n📨 [${message.author.tag}] "${message.content}"`);
+    console.log(`📜 История канала: ${history.length} сообщений`);
     
     try {
-        console.log(`📤 Отправка в Worker...`);
+        // Отправляем в Worker последние сообщения для контекста
+        const recentMessages = history.slice(-5); // Последние 5 сообщений
+        
+        console.log(`📤 Отправка в Worker c ${recentMessages.length} сообщениями контекста`);
         
         const response = await fetch(WORKER_URL, {
             method: "POST",
@@ -41,53 +64,42 @@ client.on('messageCreate', async (message) => {
                 "Content-Type": "application/json",
                 "User-Agent": "DiscordBot/1.0"
             },
-            body: JSON.stringify({ message: message.content })
+            body: JSON.stringify({ 
+                message: message.content,
+                context: recentMessages,
+                currentAuthor: message.author.username
+            })
         });
         
-        console.log(`📥 Статус ответа: ${response.status} ${response.statusText}`);
+        console.log(`📥 Статус: ${response.status}`);
         
         if (!response.ok) {
-            console.error(`❌ Worker вернул ошибку: ${response.status}`);
             throw new Error(`HTTP ${response.status}`);
         }
         
         const data = await response.json();
-        console.log(`📦 Данные от Worker:`, JSON.stringify(data));
+        console.log(`📦 Ответ Worker:`, JSON.stringify(data).substring(0, 200));
         
         if (data.reply && data.reply.trim() !== "") {
-            const replyText = `${data.reply}\n-# ||${message.content}||`;
+            // Обрезаем если слишком длинное и обрывается
+            let replyText = data.reply;
+            if (replyText.length > 500) {
+                replyText = replyText.substring(0, 497) + "...";
+            }
+            
             await message.reply(replyText);
-            console.log(`✅ Ответ отправлен в канал`);
+            console.log(`✅ Ответ отправлен (${replyText.length} символов)`);
         } else {
-            console.log(`⚠️ Worker вернул пустой reply`);
+            console.log(`⚠️ Пустой reply от Worker`);
         }
         
     } catch (err) {
         console.error(`💥 Ошибка: ${err.message}`);
-        
-        // Фолбек если Worker недоступен
-        try {
-            const localFallbacks = [
-                "Ты долбаёб, я сейчас не в настроении, отъебись!",
-                "Чё пристал, пидор, сервер лежит из-за таких как ты!",
-                "Слышь, хуесос, дай отдохнуть, заебал уже!"
-            ];
-            const fallback = localFallbacks[Math.floor(Math.random() * localFallbacks.length)];
-            await message.reply(fallback);
-            console.log(`🔄 Отправлен локальный fallback`);
-        } catch (replyError) {
-            console.error(`❌ Не удалось отправить даже fallback: ${replyError.message}`);
-        }
     }
 });
 
-// Обработка ошибок подключения
 client.on('error', (error) => {
-    console.error(`🔴 Ошибка Discord клиента: ${error.message}`);
-});
-
-client.on('disconnect', () => {
-    console.log(`🔌 Бот отключился от Discord`);
+    console.error(`🔴 Ошибка Discord: ${error.message}`);
 });
 
 console.log(`🚀 Запуск бота...`);
