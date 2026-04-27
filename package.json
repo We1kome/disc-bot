@@ -1,9 +1,12 @@
 {
-  "name": "my-discord-bot",
+  "name": "loverbot",
   "version": "1.0.0",
-  "main": "index.js",
+  "description": "Discord bot Любимка",
+  "type": "module",
+  "main": "bot.js",
   "scripts": {
-    "start": "node index.js"
+    "start": "node bot.js",
+    "dev": "node --watch bot.js"
   },
   "dependencies": {
     "discord.js": "^14.14.1"
