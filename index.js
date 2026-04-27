@@ -19,30 +19,30 @@ client.once('ready', () => {
 client.on('messageCreate', async (message) => {
     if (message.author.bot) return;
     
-    console.log(`📨 ${message.author.tag}: "${message.content}"`);
+    // ПРОВЕРЯЕМ, ЕСТЬ ЛИ ВЛОЖЕНИЯ (ФОТО)
+    const hasAttachment = message.attachments.size > 0;
+    
+    console.log(`📨 ${message.author.tag}: "${message.content}" [фото: ${hasAttachment}]`);
     
     try {
-        console.log(`🔄 Отправляю запрос в Worker...`);
-        
         const response = await fetch(WORKER_URL, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ message: message.content })
+            body: JSON.stringify({ 
+                message: message.content,
+                hasAttachment: hasAttachment
+            })
         });
         
-        console.log(`📡 Статус ответа: ${response.status}`);
-        
         const data = await response.json();
-        console.log(`📦 Данные от Worker: ${JSON.stringify(data)}`);
         
-        // ЕСЛИ ВЕРНУЛОСЬ ignore: true — НИЧЕГО НЕ ОТВЕЧАЕМ
         if (data.ignore === true) {
-            console.log(`🚫 Сообщение проигнорировано (содержит ;)`);
+            console.log(`🚫 Сообщение проигнорировано`);
             return;
         }
         
         if (data.reply) {
-            await message.reply(`${data.reply}\n> ${message.content}`);
+            await message.reply(`${data.reply}\n> ${message.content || "[фото]"}`);
         }
     } catch (err) {
         console.error(`❌ Ошибка: ${err.message}`);
