@@ -12,7 +12,7 @@ if (!TOKEN || !OWNER_ID) {
 
 const settings = {
     enabled: true,
-    mode: 'agressive', // agressive, normal, neutral
+    mode: 'agressive',
     whitelist: [],
     blacklist: [],
     channels: [],
@@ -31,7 +31,6 @@ const client = new Client({
 
 const messageHistory = new Map();
 
-// Команды
 const commands = [
     new SlashCommandBuilder()
         .setName('mode')
@@ -75,41 +74,80 @@ const commands = [
 
 const rest = new REST({ version: '10' }).setToken(TOKEN);
 
-client.once('ready', async () => {
+// Регистрируем команды ПЕРЕД запуском
+try {
+    console.log('🔄 Регистрация команд...');
+    await rest.put(Routes.applicationCommands(CLIENT_ID), { body: commands });
+    console.log('✅ Команды зарегистрированы!');
+} catch (error) {
+    console.error('❌ Ошибка регистрации:', error.message);
+}
+
+client.on('ready', () => {
     console.log(`✅ Бот ${client.user.tag} запущен!`);
-    
-    try {
-        await rest.put(Routes.applicationCommands(CLIENT_ID), { body: commands });
-        console.log(`✅ Команды зарегистрированы!`);
-    } catch (error) {
-        console.error(`❌ Ошибка команд: ${error.message}`);
-    }
 });
 
+// ВАЖНО: обработчик interactionCreate
 client.on('interactionCreate', async (interaction) => {
+    // Только слеш-команды
     if (!interaction.isChatInputCommand()) return;
+    
+    console.log(`🔧 Команда: /${interaction.commandName} от ${interaction.user.username}`);
+    
+    // Проверка владельца
     if (interaction.user.id !== OWNER_ID) {
-        return interaction.reply({ content: '🚫 Только владелец!', ephemeral: true });
+        return interaction.reply({ 
+            content: '🚫 Только владелец может использовать команды!', 
+            ephemeral: true 
+        });
     }
     
     const { commandName } = interaction;
     
     if (commandName === 'mode') {
-        settings.mode = interaction.options.getString('type');
-        const names = { agressive: '😡 Гопник', normal: '😊 Помощник', neutral: '😐 Собеседник' };
-        await interaction.reply({ content: `✅ Режим: **${names[settings.mode]}**`, ephemeral: true });
-    } else if (commandName === 'settings') {
-        await interaction.reply({ content: `⚙️ Настройки:\n\`\`\`json\n${JSON.stringify(settings, null, 2)}\n\`\`\``, ephemeral: true });
-    } else if (commandName === 'toggle') {
+        const mode = interaction.options.getString('type');
+        settings.mode = mode;
+        const names = { 
+            agressive: '😡 Агрессивный (гопник)', 
+            normal: '😊 Адекватный (помощник)', 
+            neutral: '😐 Нейтральный (собеседник)' 
+        };
+        await interaction.reply({ 
+            content: `✅ Режим изменён на: **${names[mode]}**`, 
+            ephemeral: true 
+        });
+        console.log(`🔄 Режим → ${mode}`);
+    } 
+    else if (commandName === 'settings') {
+        await interaction.reply({ 
+            content: `⚙️ **Настройки:**\n\`\`\`json\n${JSON.stringify(settings, null, 2)}\n\`\`\``, 
+            ephemeral: true 
+        });
+    } 
+    else if (commandName === 'toggle') {
         settings.enabled = interaction.options.getString('state') === 'on';
-        await interaction.reply({ content: `✅ Бот **${settings.enabled ? 'включен' : 'выключен'}**`, ephemeral: true });
-    } else if (commandName === 'chance') {
+        await interaction.reply({ 
+            content: `✅ Бот **${settings.enabled ? 'включен' : 'выключен'}**`, 
+            ephemeral: true 
+        });
+    } 
+    else if (commandName === 'chance') {
         settings.replyChance = interaction.options.getInteger('percent');
-        await interaction.reply({ content: `✅ Шанс: **${settings.replyChance}%**`, ephemeral: true });
+        await interaction.reply({ 
+            content: `✅ Шанс ответа: **${settings.replyChance}%**`, 
+            ephemeral: true 
+        });
     }
 });
 
+// Обработка обычных сообщений
 client.on('messageCreate', async (message) => {
+    // Игнорируем команды (они обрабатываются в interactionCreate)
+    if (message.content.startsWith('/')) {
+        console.log(`⏭ Пропуск команды: ${message.content}`);
+        return;
+    }
+    
     if (message.author.bot) return;
     if (!settings.enabled) return;
     if (message.content.includes(";")) return;
