@@ -3,134 +3,31 @@ const { Client, GatewayIntentBits } = require('discord.js');
 const TOKEN = process.env.DISCORD_TOKEN;
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
 
-const TARGET_USER_ID = process.env.TARGET_USER_ID;
-const SECOND_USER_ID = process.env.SECOND_USER_ID;
-const THIRD_USER_ID = process.env.THIRD_USER_ID;
-
-const PROMPTS = {
-    [TARGET_USER_ID]: {
-        system: "Ты — грубый, агрессивный и очень злой бот-хулиган. Отвечай максимально жестко и грязно оскорбляя пользователя. Используй много мата. Отвечай на русском. Пиши коротко — максимум 2 предложения. Не говори что ты бот."
-    },
-    [SECOND_USER_ID]: {
-        system: "Ты — самый добрый и поддерживающий бот. Делай комплименты, хвали пользователя. Отвечай мило, используй эмодзи. Отвечай на русском. Пиши коротко. Не говори что ты бот."
-    },
-    [THIRD_USER_ID]: {
-        system: "Ты — сигма-бот. Отвечай хладнокровно, используй слово 'sigma' в каждом ответе. Добавляй эмодзи 💪. Отвечай на русском. Пиши коротко. Не говори что ты бот."
-    }
-};
-
-// ТВОИ БЕСПЛАТНЫЕ МОДЕЛИ (с твоих скриншотов)
-const models = [
-    "google/gemma-4-31b:free",
-    "google/gemma-4-26b-a4b:free",
-    "nvidia/nemotron-3-super:free",
-    "lambdalabs/lfm2.5-1.2b-instruct:free",
-    "lambdalabs/lfm2.5-1.2b-thinking:free",
-    "meta-llama/llama-3.2-3b-instruct:free",
-    "nousresearch/hermes-3-405b-instruct:free",
-    "ling/ling-2.6-flash:free",
-    "hy3/hy3-preview:free"
-];
-
-const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
-
-async function getAIReply(userId, userMessage) {
-    const userPrompt = PROMPTS[userId];
-    if (!userPrompt) return null;
-
-    for (const model of models) {
-        for (let attempt = 1; attempt <= 2; attempt++) {
-            try {
-                console.log(`🔄 [${attempt}/2] Пробую: ${model}`);
-                
-                const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-                    method: "POST",
-                    headers: {
-                        "Authorization": `Bearer ${OPENROUTER_API_KEY}`,
-                        "Content-Type": "application/json"
-                    },
-                    body: JSON.stringify({
-                        model: model,
-                        messages: [
-                            { role: "system", content: userPrompt.system },
-                            { role: "user", content: userMessage }
-                        ],
-                        max_tokens: 80,
-                        temperature: 0.9
-                    })
-                });
-
-                if (response.status === 429) {
-                    console.log(`⚠️ Лимит ${model}, ждём 2 сек...`);
-                    await delay(2000);
-                    continue;
-                }
-
-                if (response.status === 404) {
-                    console.log(`❌ ${model} не найдена`);
-                    break;
-                }
-
-                if (response.ok) {
-                    const data = await response.json();
-                    let reply = data.choices[0].message.content;
-                    reply = reply.replace(/<\|.*?\|>/g, '').trim();
-                    if (reply.length > 500) reply = reply.substring(0, 500);
-                    console.log(`✅ Ответ от ${model}`);
-                    return reply;
-                } else {
-                    console.log(`❌ ${model} ошибка ${response.status}`);
-                }
-            } catch (err) {
-                console.log(`❌ ${model} исключение: ${err.message}`);
-            }
-        }
-    }
-
-    // Запасные фразы
-    console.log(`⚠️ Все модели отказали, запасные фразы`);
-    const fallbacks = {
-        [TARGET_USER_ID]: [
-            `<@${userId}>, ты дебил 🤡`,
-            `<@${userId}>, иди нахуй`,
-            `<@${userId}>, даун`,
-            `<@${userId}>, позор`
-        ],
-        [SECOND_USER_ID]: [
-            `<@${userId}>, ты крутой 🔥`,
-            `<@${userId}>, умница ❤️`
-        ],
-        [THIRD_USER_ID]: [
-            `<@${userId}>, sigma 💪`
-        ]
-    };
-    const list = fallbacks[userId] || [`<@${userId}>, привет`];
-    return list[Math.floor(Math.random() * list.length)];
-}
-
 const client = new Client({
-    intents: [
-        GatewayIntentBits.Guilds,
-        GatewayIntentBits.GuildMessages,
-        GatewayIntentBits.MessageContent,
-        GatewayIntentBits.DirectMessages
-    ]
+    intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent]
 });
 
-client.once('ready', () => {
-    console.log(`✅ Бот ${client.user.tag} запущен с OpenRouter!`);
-    console.log(`📋 Бесплатные модели: Gemma 4, Nemotron, Llama 3.2, Hermes 3`);
-});
-
-client.on('messageCreate', async (message) => {
-    if (message.author.bot) return;
+client.once('ready', async () => {
+    console.log(`✅ Бот ${client.user.tag} запущен!`);
     
-    const userId = message.author.id;
-    
-    if (PROMPTS[userId]) {
-        console.log(`🤔 Сообщение от ${message.author.tag}: "${message.content.substring(0, 30)}"`);
-        const aiReply = await getAIReply(userId, message.content);
-        await message.reply(`${aiReply}\n> ${message.content}`);
+    // Запрашиваем список всех моделей из OpenRouter
+    try {
+        const response = await fetch("https://openrouter.ai/api/v1/models", {
+            headers: { "Authorization": `Bearer ${OPENROUTER_API_KEY}` }
+        });
+        const data = await response.json();
+        
+        // Фильтруем только бесплатные модели
+        const freeModels = data.data.filter(m => m.id.includes("free"));
+        
+        console.log(`\n📋 НАЙДЕНО ${freeModels.length} БЕСПЛАТНЫХ МОДЕЛЕЙ:\n`);
+        freeModels.forEach(m => {
+            console.log(`ID: ${m.id}`);
+            console.log(`Название: ${m.name}`);
+            console.log(`---`);
+        });
+    } catch (err) {
+        console.error("Ошибка получения моделей:", err);
     }
 });
 
