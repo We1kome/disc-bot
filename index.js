@@ -14,7 +14,6 @@ const client = new Client({
 
 client.once('ready', () => {
     console.log(`✅ Бот ${client.user.tag} запущен!`);
-    console.log(`🤖 Нейросеть генерирует уникальные оскорбления`); 
 });
 
 client.on('messageCreate', async (message) => {
@@ -23,22 +22,27 @@ client.on('messageCreate', async (message) => {
     console.log(`📨 ${message.author.tag}: "${message.content}"`);
     
     try {
+        console.log(`🔄 Отправляю запрос в Worker...`);
+        
         const response = await fetch(WORKER_URL, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ message: message.content })
         });
         
+        console.log(`📡 Статус ответа: ${response.status}`);
+        
         const data = await response.json();
+        console.log(`📦 Данные от Worker: ${JSON.stringify(data)}`);
         
         if (data.reply) {
             await message.reply(`${data.reply}\n> ${message.content}`);
         } else {
-            await message.reply(`Иди нахуй\n> ${message.content}`);
+            await message.reply(`Ты даун\n> ${message.content}`);
         }
     } catch (err) {
         console.error(`❌ Ошибка: ${err.message}`);
-        await message.reply(`Пошел нахуй\n> ${message.content}`);
+        await message.reply(`Иди нахуй\n> ${message.content}`);
     }
 });
 
