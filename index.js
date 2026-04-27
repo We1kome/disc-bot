@@ -3,6 +3,7 @@ const { Client, GatewayIntentBits } = require('discord.js');
 const TOKEN = process.env.DISCORD_TOKEN;
 const TARGET_USER_ID = process.env.TARGET_USER_ID;     // Кому шлем оскорбления
 const SECOND_USER_ID = process.env.SECOND_USER_ID;     // Кому шлем комплименты
+const THIRD_USER_ID = process.env.THIRD_USER_ID;       // Кому шлем sigma 💪
 
 // === Жесткие оскорбления ===
 const hardInsults = [
@@ -40,20 +41,39 @@ const niceResponses = [
     "{username}, лучший комментарий за сегодня"
 ];
 
+// === Sigma-фразы (всегда одинаковые, но можно сделать массив с вариациями) ===
+const sigmaPhrases = [
+    "{username}, sigma... 💪",
+    "{username}, sigma male grindset 💪",
+    "{username}, sigma... 💪🔥",
+    "{username}, sigma boy 💪🧠",
+    "{username}, sigma... и точка 💪"
+];
+
 // === Выбор ответа в зависимости от пользователя ===
-function getResponseForUser(userId, username) {
-    let phrasesList;
-    
-    if (userId === TARGET_USER_ID) {
-        phrasesList = hardInsults;      // Оскорбления
-    } else if (userId === SECOND_USER_ID) {
-        phrasesList = niceResponses;    // Комплименты
-    } else {
-        return null;                    // Остальным не отвечаем
+function getResponseForUser(userId) {
+    // Для третьего пользователя — всегда sigma
+    if (userId === THIRD_USER_ID) {
+        // Если хочешь всегда одну фразу — используй sigmaPhrases[0]
+        // Или случайную из массива:
+        const randomSigma = sigmaPhrases[Math.floor(Math.random() sigmaPhrases.length)];
+        return randomSigma.replace("{username}", `<@${userId}>`);
     }
     
-    const randomPhrase = phrasesList[Math.floor(Math.random() * phrasesList.length)];
-    return randomPhrase.replace("{username}", `<@${userId}>`);
+    // Для основного — оскорбления
+    if (userId === TARGET_USER_ID) {
+        const randomInsult = hardInsults[Math.floor(Math.random() * hardInsults.length)];
+        return randomInsult.replace("{username}", `<@${userId}>`);
+    }
+    
+    // Для второго — комплименты
+    if (userId === SECOND_USER_ID) {
+        const randomNice = niceResponses[Math.floor(Math.random() * niceResponses.length)];
+        return randomNice.replace("{username}", `<@${userId}>`);
+    }
+    
+    // Остальным — не отвечаем
+    return null;
 }
 
 // === ЗАПУСК БОТА ===
@@ -70,6 +90,7 @@ client.on('clientReady', () => {
     console.log(`✅ Бот ${client.user.tag} запущен!`);
     console.log(`👿 Оскорбления для: ${TARGET_USER_ID || "не задан"}`);
     console.log(`😇 Комплименты для: ${SECOND_USER_ID || "не задан"}`);
+    console.log(`💪 Sigma для: ${THIRD_USER_ID || "не задан"}`);
 });
 
 client.on('ready', () => {
