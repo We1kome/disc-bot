@@ -19,27 +19,22 @@ client.once('ready', () => {
 client.on('messageCreate', async (message) => {
     if (message.author.bot) return;
     
+    // ЕСЛИ В СООБЩЕНИИ ЕСТЬ ; — НЕ ОТПРАВЛЯЕМ В WORKER
+    if (message.content.includes(";")) {
+        console.log(`🚫 Сообщение с ; игнорируется: ${message.content}`);
+        return;
+    }
+    
     console.log(`📨 ${message.author.tag}: "${message.content}"`);
     
     try {
-        console.log(`🔄 Отправляю запрос в Worker...`);
-        
         const response = await fetch(WORKER_URL, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ message: message.content })
         });
         
-        console.log(`📡 Статус ответа: ${response.status}`);
-        
         const data = await response.json();
-        console.log(`📦 Данные от Worker: ${JSON.stringify(data)}`);
-        
-        // ЕСЛИ ВЕРНУЛОСЬ ignore: true — НИЧЕГО НЕ ОТВЕЧАЕМ
-        if (data.ignore === true) {
-            console.log(`🚫 Сообщение проигнорировано (содержит ;)`);
-            return;
-        }
         
         if (data.reply) {
             await message.reply(`${data.reply}\n> ${message.content}`);
