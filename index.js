@@ -19,20 +19,25 @@ const PROMPTS = {
     }
 };
 
+// Функция задержки
+const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
 async function getAIReply(userId, userMessage) {
     const userPrompt = PROMPTS[userId];
     if (!userPrompt) return null;
 
+    // Только рабочие бесплатные модели
     const models = [
+        "meta-llama/llama-3.2-3b-instruct:free",
         "nousresearch/hermes-3-llama-3.1-405b:free",
-        "mistralai/mistral-7b-instruct:free",
-        "meta-llama/llama-3.2-3b-instruct:free"
+        "google/gemini-2.0-flash-exp:free"
     ];
-
-    let lastError = null;
 
     for (const model of models) {
         try {
+            // Задержка чтобы не спамить API
+            await delay(1000);
+            
             const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
                 method: "POST",
                 headers: {
@@ -50,32 +55,47 @@ async function getAIReply(userId, userMessage) {
                 })
             });
 
+            if (response.status === 429) {
+                console.log(`Модель ${model} лимит превышен, пробуем следующую...`);
+                await delay(2000); // Ждём 2 секунды перед следующей моделью
+                continue;
+            }
+
             if (response.ok) {
                 const data = await response.json();
                 let reply = data.choices[0].message.content;
                 if (reply.length > 1900) reply = reply.substring(0, 1900);
                 return reply;
-            } else {
-                const errorText = await response.text();
-                lastError = `${response.status}: ${errorText}`;
-                console.log(`Модель ${model} не сработала: ${response.status}`);
             }
         } catch (err) {
-            lastError = err.message;
             console.log(`Модель ${model} ошибка: ${err.message}`);
         }
     }
 
-    console.error(`Все модели провалились: ${lastError}`);
-    const fallbacks = [
-        "{username}, ты дебил 🤡",
-        "{username}, иди нахуй",
-        "{username}", "даун",
-        "{username}, позор",
-        "{username}, конченый"
-    ];
-    const randomFallback = fallbacks[Math.floor(Math.random() * fallbacks.length)];
-    return randomFallback.replace("{username}", `<@${userId}>`);
+    // Запасные фразы если всё сломалось
+    const fallbacks = {
+        [TARGET_USER_ID]: [
+            `<@${userId}>, ты дебил 🤡`,
+            `<@${userId}>, иди нахуй`,
+            `<@${userId}>, даун ебучий`,
+            `<@${userId}>, позор человечества`,
+            `<@${userId}>, конченый`
+        ],
+        [SECOND_USER_ID]: [
+            `<@${userId}>, ты крутой 🔥`,
+            `<@${userId}>, умница ❤️`,
+            `<@${userId}>, лучший 🧠`,
+            `<@${userId}>, гений ✨`
+        ],
+        [THIRD_USER_ID]: [
+            `<@${userId}>, sigma 💪`,
+            `<@${userId}>, sigma male 🧠`,
+            `<@${userId}>, sigma... 💪🔥`
+        ]
+    };
+
+    const userFallbacks = fallbacks[userId] || [`<@${userId}>, привет`];
+    return userFallbacks[Math.floor(Math.random() * userFallbacks.length)];
 }
 
 const client = new Client({
@@ -88,7 +108,7 @@ const client = new Client({
 });
 
 client.once('ready', () => {
-    console.log(`✅ Бот ${client.user.tag} запущен с OpenRouter!`);
+    console.log(`✅ Бот ${client.user.tag} запущен!`);
 });
 
 client.on('messageCreate', async (message) => {
@@ -97,7 +117,7 @@ client.on('messageCreate', async (message) => {
     const userId = message.author.id;
     
     if (PROMPTS[userId]) {
-        console.log(`🤔 Генерирую ответ для ${message.author.tag}...`);
+        console.log(`🤔 Обработка сообщения от ${message.author.tag}...`);
         const aiReply = await getAIReply(userId, message.content);
         await message.reply(`${aiReply}\n> ${message.content}`);
     }
