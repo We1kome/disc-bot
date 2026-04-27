@@ -7,7 +7,6 @@ const TARGET_USER_ID = process.env.TARGET_USER_ID;
 const SECOND_USER_ID = process.env.SECOND_USER_ID;
 const THIRD_USER_ID = process.env.THIRD_USER_ID;
 
-// ... (твои PROMPTS остаются без изменений) ...
 const PROMPTS = {
     [TARGET_USER_ID]: {
         system: "Ты — грубый, агрессивный и очень злой бот-хулиган. Отвечай максимально жестко и грязно оскорбляя пользователя. Используй много мата. Отвечай на русском. Пиши коротко — максимум 2 предложения. Не говори что ты бот."
@@ -20,23 +19,29 @@ const PROMPTS = {
     }
 };
 
+// ТВОИ БЕСПЛАТНЫЕ МОДЕЛИ (с твоих скриншотов)
+const models = [
+    "google/gemma-4-31b:free",
+    "google/gemma-4-26b-a4b:free",
+    "nvidia/nemotron-3-super:free",
+    "lambdalabs/lfm2.5-1.2b-instruct:free",
+    "lambdalabs/lfm2.5-1.2b-thinking:free",
+    "meta-llama/llama-3.2-3b-instruct:free",
+    "nousresearch/hermes-3-405b-instruct:free",
+    "ling/ling-2.6-flash:free",
+    "hy3/hy3-preview:free"
+];
+
 const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
 async function getAIReply(userId, userMessage) {
     const userPrompt = PROMPTS[userId];
     if (!userPrompt) return null;
 
-    // === АКТУАЛЬНЫЙ СПИСОК БЕСПЛАТНЫХ МОДЕЛЕЙ (Апрель 2026) ===
-    const models = [
-        "qwen/qwen3.6-plus-preview:free",        // Новая мощная бесплатная модель
-        "deepseek/deepseek-chat:free",            // Стабильная DeepSeek
-        "google/gemini-2.0-flash-lite-preview-02-05:free" // Быстрая Gemini
-    ];
-
     for (const model of models) {
-        for (let attempt = 1; attempt <= 2; attempt++) { // Две попытки на модель
+        for (let attempt = 1; attempt <= 2; attempt++) {
             try {
-                console.log(`🔄 Попытка ${attempt} для модели: ${model}`);
+                console.log(`🔄 [${attempt}/2] Пробую: ${model}`);
                 
                 const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
                     method: "POST",
@@ -56,43 +61,53 @@ async function getAIReply(userId, userMessage) {
                 });
 
                 if (response.status === 429) {
-                    console.log(`⚠️ Лимит модели ${model}, ждём 3 секунды...`);
-                    await delay(3000);
+                    console.log(`⚠️ Лимит ${model}, ждём 2 сек...`);
+                    await delay(2000);
                     continue;
                 }
 
                 if (response.status === 404) {
-                    console.log(`❌ Модель ${model} не найдена (404) - пропускаем`);
-                    break; // Модель мертва, переходим к следующей
+                    console.log(`❌ ${model} не найдена`);
+                    break;
                 }
 
                 if (response.ok) {
                     const data = await response.json();
                     let reply = data.choices[0].message.content;
                     reply = reply.replace(/<\|.*?\|>/g, '').trim();
-                    console.log(`✅ Успешный ответ от ${model}`);
+                    if (reply.length > 500) reply = reply.substring(0, 500);
+                    console.log(`✅ Ответ от ${model}`);
                     return reply;
                 } else {
-                    console.log(`❌ Ошибка ${response.status} для ${model}`);
+                    console.log(`❌ ${model} ошибка ${response.status}`);
                 }
             } catch (err) {
-                console.log(`❌ Исключение для ${model}: ${err.message}`);
+                console.log(`❌ ${model} исключение: ${err.message}`);
             }
         }
     }
 
-    // Фоллбэк (твои старые фразы)
-    console.log(`⚠️ Все ИИ-модели отказали, включаю режим "дебил"`);
+    // Запасные фразы
+    console.log(`⚠️ Все модели отказали, запасные фразы`);
     const fallbacks = {
-        [TARGET_USER_ID]: [`<@${userId}>, ты дебил 🤡`, `<@${userId}>, иди нахуй`],
-        [SECOND_USER_ID]: [`<@${userId}>, ты крутой 🔥`],
-        [THIRD_USER_ID]: [`<@${userId}>, sigma 💪`]
+        [TARGET_USER_ID]: [
+            `<@${userId}>, ты дебил 🤡`,
+            `<@${userId}>, иди нахуй`,
+            `<@${userId}>, даун`,
+            `<@${userId}>, позор`
+        ],
+        [SECOND_USER_ID]: [
+            `<@${userId}>, ты крутой 🔥`,
+            `<@${userId}>, умница ❤️`
+        ],
+        [THIRD_USER_ID]: [
+            `<@${userId}>, sigma 💪`
+        ]
     };
     const list = fallbacks[userId] || [`<@${userId}>, привет`];
     return list[Math.floor(Math.random() * list.length)];
 }
 
-// ... (остальной код клиента без изменений) ...
 const client = new Client({
     intents: [
         GatewayIntentBits.Guilds,
@@ -104,7 +119,7 @@ const client = new Client({
 
 client.once('ready', () => {
     console.log(`✅ Бот ${client.user.tag} запущен с OpenRouter!`);
-    console.log(`📋 Используются актуальные бесплатные модели (Апрель 2026)`);
+    console.log(`📋 Бесплатные модели: Gemma 4, Nemotron, Llama 3.2, Hermes 3`);
 });
 
 client.on('messageCreate', async (message) => {
@@ -113,7 +128,7 @@ client.on('messageCreate', async (message) => {
     const userId = message.author.id;
     
     if (PROMPTS[userId]) {
-        console.log(`🤔 Получено сообщение от ${message.author.tag}`);
+        console.log(`🤔 Сообщение от ${message.author.tag}: "${message.content.substring(0, 30)}"`);
         const aiReply = await getAIReply(userId, message.content);
         await message.reply(`${aiReply}\n> ${message.content}`);
     }
