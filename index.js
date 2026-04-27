@@ -35,14 +35,17 @@ client.on('messageCreate', async (message) => {
         const data = await response.json();
         console.log(`📦 Данные от Worker: ${JSON.stringify(data)}`);
         
+        // ЕСЛИ ВЕРНУЛОСЬ ignore: true — НИЧЕГО НЕ ОТВЕЧАЕМ
+        if (data.ignore === true) {
+            console.log(`🚫 Сообщение проигнорировано (содержит ;)`);
+            return;
+        }
+        
         if (data.reply) {
             await message.reply(`${data.reply}\n> ${message.content}`);
-        } else {
-            await message.reply(`Ты даун\n> ${message.content}`);
         }
     } catch (err) {
         console.error(`❌ Ошибка: ${err.message}`);
-        await message.reply(`Иди нахуй\n> ${message.content}`);
     }
 });
 
