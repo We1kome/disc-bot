@@ -46,6 +46,9 @@ const commands = [
         .setName('settings')
         .setDescription('Показать настройки'),
     new SlashCommandBuilder()
+        .setName('cleanup')
+        .setDescription('Очистить старые команды (при багах)'),
+    new SlashCommandBuilder()
         .setName('help')
         .setDescription('Список команд')
 ].map(c => c.toJSON());
@@ -58,7 +61,7 @@ client.on('ready', async () => {
         await rest.put(Routes.applicationCommands(CLIENT_ID), { body: commands });
         console.log('Команды зарегистрированы');
     } catch (e) {
-        console.error('Ошибка регистрации команд:', e.message);
+        console.error('Ошибка регистрации:', e.message);
     }
 });
 
@@ -68,28 +71,45 @@ client.on('interactionCreate', async (interaction) => {
         return interaction.reply({ content: 'Нет прав', flags: 64 });
     }
     
-    await interaction.deferReply({ flags: 64 });
     const { commandName } = interaction;
+    
+    // Для cleanup не делаем defer — он может занять время
+    if (commandName === 'cleanup') {
+        await interaction.deferReply({ flags: 64 });
+        try {
+            // Удаляем все текущие команды
+            await rest.put(Routes.applicationCommands(CLIENT_ID), { body: [] });
+            // Ждём
+            await new Promise(r => setTimeout(r, 2000));
+            // Регистрируем заново
+            await rest.put(Routes.applicationCommands(CLIENT_ID), { body: commands });
+            return interaction.editReply({ content: '✅ Старые команды удалены, новые зарегистрированы!' });
+        } catch (e) {
+            return interaction.editReply({ content: '❌ Ошибка: ' + e.message });
+        }
+    }
+    
+    await interaction.deferReply({ flags: 64 });
     
     if (commandName === 'toggle') {
         settings.enabled = interaction.options.getString('state') === 'on';
-        return interaction.editReply({ content: settings.enabled ? 'Включен' : 'Выключен' });
+        return interaction.editReply({ content: settings.enabled ? '✅ Включен' : '❌ Выключен' });
     }
     
     if (commandName === 'roastchance') {
         settings.roastChance = interaction.options.getInteger('percent');
-        return interaction.editReply({ content: `Шанс: ${settings.roastChance}%` });
+        return interaction.editReply({ content: `✅ Шанс агро: ${settings.roastChance}%` });
     }
     
     if (commandName === 'settings') {
         return interaction.editReply({ 
-            content: `⚙️ Настройки:\nВкл: ${settings.enabled}\nШанс агро: ${settings.roastChance}%` 
+            content: `⚙️ **Настройки:**\nВкл: ${settings.enabled}\nШанс агро: ${settings.roastChance}%` 
         });
     }
     
     if (commandName === 'help') {
         return interaction.editReply({ 
-            content: '**Команды:**\n/toggle — вкл/выкл\n/roastchance — шанс агро\n/settings — настройки\n/help — этот список' 
+            content: `**Команды:**\n/toggle — вкл/выкл\n/roastchance — шанс агро\n/settings — настройки\n/cleanup — очистка команд\n/help — этот список` 
         });
     }
 });
@@ -138,7 +158,7 @@ client.on('messageCreate', async (message) => {
             await message.reply(replyText);
         }
     } catch (err) {
-        console.error('Ошибка отправки:', err.message);
+        console.error('Ошибка:', err.message);
     }
 });
 
