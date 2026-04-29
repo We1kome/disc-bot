@@ -14,23 +14,17 @@ if (!TOKEN || !CLIENT_ID || !OWNER_ID || !ROAST_WORKER || !HELPER_WORKER || !ROA
     process.exit(1);
 }
 
-// Загружаем настройки из файла
 let settings = { enabled: true, roastChance: 15 };
 
 try {
     if (fs.existsSync('./settings.json')) {
-        const data = fs.readFileSync('./settings.json', 'utf8');
-        settings = JSON.parse(data);
+        settings = JSON.parse(fs.readFileSync('./settings.json', 'utf8'));
         console.log('📂 Настройки загружены:', settings);
     }
-} catch (e) {
-    console.log('📂 Создаю новый файл настроек');
-}
+} catch (e) {}
 
-// Функция сохранения
 function saveSettings() {
     fs.writeFileSync('./settings.json', JSON.stringify(settings, null, 2));
-    console.log('💾 Настройки сохранены');
 }
 
 const client = new Client({
@@ -46,10 +40,7 @@ const commands = [
         .setName('toggle')
         .setDescription('Вкл/выкл бота')
         .addStringOption(o => o.setName('state').setDescription('Состояние').setRequired(true)
-            .addChoices(
-                { name: 'Включить', value: 'on' }, 
-                { name: 'Выключить', value: 'off' }
-            )),
+            .addChoices({ name: 'Включить', value: 'on' }, { name: 'Выключить', value: 'off' })),
     new SlashCommandBuilder()
         .setName('roastchance')
         .setDescription('Шанс агрессивного ответа')
@@ -81,7 +72,6 @@ client.on('ready', async () => {
 
 client.on('interactionCreate', async (interaction) => {
     if (!interaction.isChatInputCommand()) return;
-    
     if (interaction.user.id !== OWNER_ID) {
         return interaction.reply({ content: 'Нет прав', flags: 64 });
     }
@@ -115,15 +105,11 @@ client.on('interactionCreate', async (interaction) => {
     }
     
     if (commandName === 'settings') {
-        return interaction.editReply({ 
-            content: `⚙️ Вкл: ${settings.enabled}\nШанс агро: ${settings.roastChance}%` 
-        });
+        return interaction.editReply({ content: `⚙️ Вкл: ${settings.enabled}\nШанс агро: ${settings.roastChance}%` });
     }
     
     if (commandName === 'help') {
-        return interaction.editReply({ 
-            content: '/toggle /roastchance /settings /cleanup /help' 
-        });
+        return interaction.editReply({ content: '/toggle /roastchance /settings /cleanup /help' });
     }
 });
 
@@ -139,11 +125,17 @@ client.on('messageCreate', async (message) => {
     if (channelId === ROAST_CHANNEL) {
         const roll = Math.random() * 100;
         console.log(`🎲 Шанс ${settings.roastChance}%, выпало ${roll.toFixed(1)}%`);
-        if (roll > settings.roastChance) return;
+        if (roll > settings.roastChance) {
+            console.log('⏭ Пропускаем');
+            return;
+        }
         workerUrl = ROAST_WORKER;
+        console.log('🔥 Выбран loverbot');
     } else if (channelId === HELPER_CHANNEL) {
         workerUrl = HELPER_WORKER;
+        console.log('💬 Выбран loverhelper');
     } else {
+        console.log('⏭ Не отслеживаемый канал');
         return;
     }
     
@@ -160,6 +152,9 @@ client.on('messageCreate', async (message) => {
         
         let sendMessage = message.content || (message.attachments.size > 0 ? '[фото]' : '');
         
+        console.log(`📤 Отправляю в Worker: "${sendMessage.substring(0, 50)}"`);
+        console.log(`📋 Контекст: ${context.length} сообщения`);
+        
         const response = await fetch(workerUrl, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -170,15 +165,21 @@ client.on('messageCreate', async (message) => {
             })
         });
         
+        console.log(`📡 Статус ответа: ${response.status}`);
+        
         const data = await response.json();
+        console.log(`📦 Данные: ${JSON.stringify(data).substring(0, 100)}`);
         
         if (data.reply) {
             let replyText = data.reply;
             if (replyText.length > 500) replyText = replyText.substring(0, 497) + "...";
             await message.reply(replyText);
+            console.log('✅ Отправлено');
+        } else {
+            console.log('🔇 Пустой ответ от Worker');
         }
     } catch (err) {
-        console.error('Ошибка:', err.message);
+        console.error('❌ Ошибка:', err.message);
     }
 });
 
