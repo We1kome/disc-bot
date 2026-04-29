@@ -125,17 +125,11 @@ client.on('messageCreate', async (message) => {
     if (channelId === ROAST_CHANNEL) {
         const roll = Math.random() * 100;
         console.log(`🎲 Шанс ${settings.roastChance}%, выпало ${roll.toFixed(1)}%`);
-        if (roll > settings.roastChance) {
-            console.log('⏭ Пропускаем');
-            return;
-        }
+        if (roll > settings.roastChance) return;
         workerUrl = ROAST_WORKER;
-        console.log('🔥 Выбран loverbot');
     } else if (channelId === HELPER_CHANNEL) {
         workerUrl = HELPER_WORKER;
-        console.log('💬 Выбран loverhelper');
     } else {
-        console.log('⏭ Не отслеживаемый канал');
         return;
     }
     
@@ -143,6 +137,8 @@ client.on('messageCreate', async (message) => {
         const messages = await message.channel.messages.fetch({ limit: 3 });
         const context = [];
         messages.reverse().forEach(msg => {
+            // Пропускаем сообщения ботов (включая нашего)
+            if (msg.author.bot) return;
             if (!msg.content.startsWith('/') && !msg.content.includes(';')) {
                 let ctx = msg.author.username + ': ';
                 ctx += msg.content || (msg.attachments.size > 0 ? '[фото/файл]' : '');
@@ -152,7 +148,7 @@ client.on('messageCreate', async (message) => {
         
         let sendMessage = message.content || (message.attachments.size > 0 ? '[фото]' : '');
         
-        console.log(`📤 Отправляю в Worker: "${sendMessage.substring(0, 50)}"`);
+        console.log(`📤 Отправляю в Worker: "${sendMessage}"`);
         console.log(`📋 Контекст: ${context.length} сообщения`);
         
         const response = await fetch(workerUrl, {
@@ -165,10 +161,9 @@ client.on('messageCreate', async (message) => {
             })
         });
         
-        console.log(`📡 Статус ответа: ${response.status}`);
+        console.log(`📡 Статус: ${response.status}`);
         
         const data = await response.json();
-        console.log(`📦 Данные: ${JSON.stringify(data).substring(0, 300)}`);
         
         if (data.reply) {
             let replyText = data.reply;
@@ -176,7 +171,7 @@ client.on('messageCreate', async (message) => {
             await message.reply(replyText);
             console.log('✅ Отправлено');
         } else {
-            console.log('🔇 Пустой ответ от Worker');
+            console.log('🔇 Пустой ответ');
         }
     } catch (err) {
         console.error('❌ Ошибка:', err.message);
