@@ -1,4 +1,5 @@
 import { Client, GatewayIntentBits, REST, Routes, SlashCommandBuilder } from 'discord.js';
+import fs from 'fs';
 
 const TOKEN = process.env.DISCORD_TOKEN;
 const CLIENT_ID = process.env.CLIENT_ID;
@@ -13,10 +14,24 @@ if (!TOKEN || !CLIENT_ID || !OWNER_ID || !ROAST_WORKER || !HELPER_WORKER || !ROA
     process.exit(1);
 }
 
-const settings = {
-    enabled: true,
-    roastChance: 15
-};
+// Загружаем настройки из файла
+let settings = { enabled: true, roastChance: 15 };
+
+try {
+    if (fs.existsSync('./settings.json')) {
+        const data = fs.readFileSync('./settings.json', 'utf8');
+        settings = JSON.parse(data);
+        console.log('📂 Настройки загружены:', settings);
+    }
+} catch (e) {
+    console.log('📂 Создаю новый файл настроек');
+}
+
+// Функция сохранения
+function saveSettings() {
+    fs.writeFileSync('./settings.json', JSON.stringify(settings, null, 2));
+    console.log('💾 Настройки сохранены');
+}
 
 const client = new Client({
     intents: [
@@ -55,11 +70,12 @@ const rest = new REST({ version: '10' }).setToken(TOKEN);
 
 client.on('ready', async () => {
     console.log('✅ Бот запущен:', client.user.tag);
+    console.log('⚙️ Настройки:', settings);
     try {
         await rest.put(Routes.applicationCommands(CLIENT_ID), { body: commands });
         console.log('✅ Команды зарегистрированы');
     } catch (e) {
-        console.error('❌ Ошибка регистрации:', e.message);
+        console.error('❌ Ошибка:', e.message);
     }
 });
 
@@ -80,7 +96,7 @@ client.on('interactionCreate', async (interaction) => {
             await rest.put(Routes.applicationCommands(CLIENT_ID), { body: commands });
             return interaction.editReply({ content: '✅ Очищено!' });
         } catch (e) {
-            return interaction.editReply({ content: '❌ Ошибка: ' + e.message });
+            return interaction.editReply({ content: '❌ Ошибка' });
         }
     }
     
@@ -88,11 +104,13 @@ client.on('interactionCreate', async (interaction) => {
     
     if (commandName === 'toggle') {
         settings.enabled = interaction.options.getString('state') === 'on';
+        saveSettings();
         return interaction.editReply({ content: settings.enabled ? '✅ Включен' : '❌ Выключен' });
     }
     
     if (commandName === 'roastchance') {
         settings.roastChance = interaction.options.getInteger('percent');
+        saveSettings();
         return interaction.editReply({ content: `✅ Шанс агро: ${settings.roastChance}%` });
     }
     
@@ -116,17 +134,12 @@ client.on('messageCreate', async (message) => {
     
     const channelId = message.channel.id;
     
-    console.log(`\n📨 [${message.author.username}] канал ${channelId}: "${message.content}"`);
-    
     let workerUrl;
     
     if (channelId === ROAST_CHANNEL) {
         const roll = Math.random() * 100;
         console.log(`🎲 Шанс ${settings.roastChance}%, выпало ${roll.toFixed(1)}%`);
-        if (roll > settings.roastChance) {
-            console.log('⏭ Пропускаем');
-            return;
-        }
+        if (roll > settings.roastChance) return;
         workerUrl = ROAST_WORKER;
     } else if (channelId === HELPER_CHANNEL) {
         workerUrl = HELPER_WORKER;
@@ -135,25 +148,23 @@ client.on('messageCreate', async (message) => {
     }
     
     try {
-        // Читаем историю чата
-        const messages = await message.channel.messages.fetch({ limit: 10 });
+        const messages = await message.channel.messages.fetch({ limit: 3 });
         const context = [];
         messages.reverse().forEach(msg => {
             if (!msg.content.startsWith('/') && !msg.content.includes(';')) {
-                context.push({
-                    author: msg.author.username,
-                    content: msg.content
-                });
+                let ctx = msg.author.username + ': ';
+                ctx += msg.content || (msg.attachments.size > 0 ? '[фото/файл]' : '');
+                context.push({ author: msg.author.username, content: ctx });
             }
         });
         
-        console.log(`📋 Контекст: ${context.length} сообщений`);
+        let sendMessage = message.content || (message.attachments.size > 0 ? '[фото]' : '');
         
         const response = await fetch(workerUrl, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
-                message: message.content,
+                message: sendMessage,
                 context: context,
                 currentAuthor: message.author.username
             })
@@ -165,12 +176,9 @@ client.on('messageCreate', async (message) => {
             let replyText = data.reply;
             if (replyText.length > 500) replyText = replyText.substring(0, 497) + "...";
             await message.reply(replyText);
-            console.log('✅ Отправлено');
-        } else {
-            console.log('🔇 Пустой ответ');
         }
     } catch (err) {
-        console.error('❌ Ошибка:', err.message);
+        console.error('Ошибка:', err.message);
     }
 });
 
