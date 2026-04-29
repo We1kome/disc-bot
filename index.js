@@ -26,8 +26,6 @@ const client = new Client({
     ]
 });
 
-const messageHistory = new Map();
-
 const commands = [
     new SlashCommandBuilder()
         .setName('toggle')
@@ -47,7 +45,7 @@ const commands = [
         .setDescription('Показать настройки'),
     new SlashCommandBuilder()
         .setName('cleanup')
-        .setDescription('Очистить старые команды (при багах)'),
+        .setDescription('Очистить старые команды'),
     new SlashCommandBuilder()
         .setName('help')
         .setDescription('Список команд')
@@ -56,34 +54,31 @@ const commands = [
 const rest = new REST({ version: '10' }).setToken(TOKEN);
 
 client.on('ready', async () => {
-    console.log('Бот запущен:', client.user.tag);
+    console.log('✅ Бот запущен:', client.user.tag);
     try {
         await rest.put(Routes.applicationCommands(CLIENT_ID), { body: commands });
-        console.log('Команды зарегистрированы');
+        console.log('✅ Команды зарегистрированы');
     } catch (e) {
-        console.error('Ошибка регистрации:', e.message);
+        console.error('❌ Ошибка регистрации:', e.message);
     }
 });
 
 client.on('interactionCreate', async (interaction) => {
     if (!interaction.isChatInputCommand()) return;
+    
     if (interaction.user.id !== OWNER_ID) {
         return interaction.reply({ content: 'Нет прав', flags: 64 });
     }
     
     const { commandName } = interaction;
     
-    // Для cleanup не делаем defer — он может занять время
     if (commandName === 'cleanup') {
         await interaction.deferReply({ flags: 64 });
         try {
-            // Удаляем все текущие команды
             await rest.put(Routes.applicationCommands(CLIENT_ID), { body: [] });
-            // Ждём
             await new Promise(r => setTimeout(r, 2000));
-            // Регистрируем заново
             await rest.put(Routes.applicationCommands(CLIENT_ID), { body: commands });
-            return interaction.editReply({ content: '✅ Старые команды удалены, новые зарегистрированы!' });
+            return interaction.editReply({ content: '✅ Очищено!' });
         } catch (e) {
             return interaction.editReply({ content: '❌ Ошибка: ' + e.message });
         }
@@ -103,13 +98,13 @@ client.on('interactionCreate', async (interaction) => {
     
     if (commandName === 'settings') {
         return interaction.editReply({ 
-            content: `⚙️ **Настройки:**\nВкл: ${settings.enabled}\nШанс агро: ${settings.roastChance}%` 
+            content: `⚙️ Вкл: ${settings.enabled}\nШанс агро: ${settings.roastChance}%` 
         });
     }
     
     if (commandName === 'help') {
         return interaction.editReply({ 
-            content: `**Команды:**\n/toggle — вкл/выкл\n/roastchance — шанс агро\n/settings — настройки\n/cleanup — очистка команд\n/help — этот список` 
+            content: '/toggle /roastchance /settings /cleanup /help' 
         });
     }
 });
@@ -120,10 +115,18 @@ client.on('messageCreate', async (message) => {
     if (message.content.startsWith('/')) return;
     
     const channelId = message.channel.id;
+    
+    console.log(`\n📨 [${message.author.username}] канал ${channelId}: "${message.content}"`);
+    
     let workerUrl;
     
     if (channelId === ROAST_CHANNEL) {
-        if (Math.random() * 100 > settings.roastChance) return;
+        const roll = Math.random() * 100;
+        console.log(`🎲 Шанс ${settings.roastChance}%, выпало ${roll.toFixed(1)}%`);
+        if (roll > settings.roastChance) {
+            console.log('⏭ Пропускаем');
+            return;
+        }
         workerUrl = ROAST_WORKER;
     } else if (channelId === HELPER_CHANNEL) {
         workerUrl = HELPER_WORKER;
@@ -131,21 +134,27 @@ client.on('messageCreate', async (message) => {
         return;
     }
     
-    if (!messageHistory.has(channelId)) messageHistory.set(channelId, []);
-    const history = messageHistory.get(channelId);
-    
-    let cleanContent = message.content;
-    
-    history.push({ author: message.author.username, content: cleanContent });
-    if (history.length > 5) history.shift();
-    
     try {
+        // Читаем историю чата
+        const messages = await message.channel.messages.fetch({ limit: 10 });
+        const context = [];
+        messages.reverse().forEach(msg => {
+            if (!msg.content.startsWith('/') && !msg.content.includes(';')) {
+                context.push({
+                    author: msg.author.username,
+                    content: msg.content
+                });
+            }
+        });
+        
+        console.log(`📋 Контекст: ${context.length} сообщений`);
+        
         const response = await fetch(workerUrl, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
-                message: cleanContent,
-                context: history,
+                message: message.content,
+                context: context,
                 currentAuthor: message.author.username
             })
         });
@@ -156,9 +165,12 @@ client.on('messageCreate', async (message) => {
             let replyText = data.reply;
             if (replyText.length > 500) replyText = replyText.substring(0, 497) + "...";
             await message.reply(replyText);
+            console.log('✅ Отправлено');
+        } else {
+            console.log('🔇 Пустой ответ');
         }
     } catch (err) {
-        console.error('Ошибка:', err.message);
+        console.error('❌ Ошибка:', err.message);
     }
 });
 
