@@ -168,7 +168,7 @@ client.on('messageCreate', async (message) => {
         console.log(`📡 Статус ответа: ${response.status}`);
         
         const data = await response.json();
-        console.log(`📦 Данные: ${JSON.stringify(data).substring(0, 100)}`);
+        console.log(`📦 Данные: ${JSON.stringify(data).substring(0, 300)}`);
         
         if (data.reply) {
             let replyText = data.reply;
