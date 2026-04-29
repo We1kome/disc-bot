@@ -3,12 +3,11 @@ import { Client, GatewayIntentBits, REST, Routes, SlashCommandBuilder } from 'di
 const TOKEN = process.env.DISCORD_TOKEN;
 const CLIENT_ID = process.env.CLIENT_ID || "1498208678723977216";
 const OWNER_ID = process.env.OWNER_ID;
-const WORKER_URL = "https://loverbot.vladikkotik3.workers.dev";
 
-if (!TOKEN || !OWNER_ID) {
-    console.error('Нет TOKEN или OWNER_ID');
-    process.exit(1);
-}
+const ROAST_WORKER = "https://loverbot.vladikkotik3.workers.dev";
+const HELPER_WORKER = "https://loverhelper.vladikkotik3.workers.dev";
+
+if (!TOKEN || !OWNER_ID) process.exit(1);
 
 const settings = {
     enabled: true,
@@ -57,19 +56,12 @@ const rest = new REST({ version: '10' }).setToken(TOKEN);
 
 client.on('ready', async () => {
     console.log('Бот запущен:', client.user.tag);
-    try {
-        await rest.put(Routes.applicationCommands(CLIENT_ID), { body: commands });
-        console.log('Команды зарегистрированы');
-    } catch (e) {
-        console.error('Ошибка команд:', e.message);
-    }
+    await rest.put(Routes.applicationCommands(CLIENT_ID), { body: commands });
 });
 
 client.on('interactionCreate', async (interaction) => {
     if (!interaction.isChatInputCommand()) return;
-    if (interaction.user.id !== OWNER_ID) {
-        return interaction.reply({ content: 'Нет прав', flags: 64 });
-    }
+    if (interaction.user.id !== OWNER_ID) return interaction.reply({ content: 'Нет прав', flags: 64 });
     
     await interaction.deferReply({ flags: 64 });
     const { commandName } = interaction;
@@ -106,17 +98,16 @@ client.on('messageCreate', async (message) => {
     const channelId = message.channel.id;
     let responseMode = settings.mode;
     
-    // Канал с roast chance
     if (channelId === "857600197809668159") {
         if (Math.random() * 100 > settings.roastChance) return;
         responseMode = 'agressive';
     }
-    // Канал всегда адекватный
     if (channelId === "1498239736320622684") {
         responseMode = 'normal';
     }
     
-    // Собираем историю
+    const workerUrl = responseMode === 'agressive' ? ROAST_WORKER : HELPER_WORKER;
+    
     if (!messageHistory.has(channelId)) messageHistory.set(channelId, []);
     const history = messageHistory.get(channelId);
     
@@ -132,10 +123,8 @@ client.on('messageCreate', async (message) => {
     history.push({ author: message.author.username, content: cleanContent });
     if (history.length > 5) history.shift();
     
-    console.log(`📨 [${message.author.username}] ${responseMode}: "${cleanContent}"`);
-    
     try {
-        const response = await fetch(WORKER_URL, {
+        const response = await fetch(workerUrl, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
@@ -147,11 +136,9 @@ client.on('messageCreate', async (message) => {
         });
         
         const data = await response.json();
-        console.log('Ответ Worker:', JSON.stringify(data));
         
         if (data.reply) {
             let replyText = data.reply;
-            // Обратная замена ников на теги
             mentionedUsers.forEach((user, id) => {
                 const escaped = user.username.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
                 replyText = replyText.replace(new RegExp(`@${escaped}`, 'gi'), `<@${id}>`);
@@ -159,9 +146,6 @@ client.on('messageCreate', async (message) => {
             
             if (replyText.length > 500) replyText = replyText.substring(0, 497) + "...";
             await message.reply(replyText);
-            console.log('✅ Отправлено');
-        } else {
-            console.log('⚠️ Пустой reply');
         }
     } catch (err) {
         console.error('Ошибка:', err.message);
