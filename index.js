@@ -5,11 +5,12 @@ const TOKEN = process.env.DISCORD_TOKEN;
 const CLIENT_ID = process.env.CLIENT_ID;
 const OWNER_ID = process.env.OWNER_ID;
 const ROAST_WORKER = process.env.ROAST_WORKER;
+const ROAST_WORKER_BACKUP = process.env.ROAST_WORKER_BACKUP;
 const HELPER_WORKER = process.env.HELPER_WORKER;
 const ROAST_CHANNEL = process.env.ROAST_CHANNEL;
 const HELPER_CHANNEL = process.env.HELPER_CHANNEL;
 
-if (!TOKEN || !CLIENT_ID || !OWNER_ID || !ROAST_WORKER || !HELPER_WORKER || !ROAST_CHANNEL || !HELPER_CHANNEL) {
+if (!TOKEN || !CLIENT_ID || !OWNER_ID || !ROAST_WORKER || !ROAST_WORKER_BACKUP || !HELPER_WORKER || !ROAST_CHANNEL || !HELPER_CHANNEL) {
     console.error('Нет всех переменных');
     process.exit(1);
 }
@@ -113,6 +114,27 @@ client.on('interactionCreate', async (interaction) => {
     }
 });
 
+async function tryWorkers(workerUrl, backupUrl, body) {
+    let response = await fetch(workerUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body)
+    });
+    
+    let data = await response.json();
+    if (data.reply) return data.reply;
+    
+    console.log('🔄 Основной молчит, пробую запасной...');
+    response = await fetch(backupUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body)
+    });
+    
+    data = await response.json();
+    return data.reply || null;
+}
+
 client.on('messageCreate', async (message) => {
     if (message.author.bot) return;
     if (!settings.enabled) return;
@@ -120,58 +142,50 @@ client.on('messageCreate', async (message) => {
     
     const channelId = message.channel.id;
     
-    let workerUrl;
+    let workerUrl, backupUrl;
     
     if (channelId === ROAST_CHANNEL) {
         const roll = Math.random() * 100;
         console.log(`🎲 Шанс ${settings.roastChance}%, выпало ${roll.toFixed(1)}%`);
         if (roll > settings.roastChance) return;
         workerUrl = ROAST_WORKER;
+        backupUrl = ROAST_WORKER_BACKUP;
     } else if (channelId === HELPER_CHANNEL) {
         workerUrl = HELPER_WORKER;
+        backupUrl = HELPER_WORKER;
     } else {
         return;
     }
     
     try {
-        const messages = await message.channel.messages.fetch({ limit: 3 });
+        const messages = await message.channel.messages.fetch({ limit: 2 });
         const context = [];
         messages.reverse().forEach(msg => {
-            // Пропускаем сообщения ботов (включая нашего)
             if (msg.author.bot) return;
             if (!msg.content.startsWith('/') && !msg.content.includes(';')) {
                 let ctx = msg.author.username + ': ';
-                ctx += msg.content || (msg.attachments.size > 0 ? '[фото/файл]' : '');
+                ctx += msg.content || (msg.attachments.size > 0 ? '[фото]' : '');
                 context.push({ author: msg.author.username, content: ctx });
             }
         });
         
         let sendMessage = message.content || (message.attachments.size > 0 ? '[фото]' : '');
         
-        console.log(`📤 Отправляю в Worker: "${sendMessage}"`);
-        console.log(`📋 Контекст: ${context.length} сообщения`);
+        console.log(`📤 Запрос: "${sendMessage.substring(0, 50)}"`);
         
-        const response = await fetch(workerUrl, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-                message: sendMessage,
-                context: context,
-                currentAuthor: message.author.username
-            })
+        const replyText = await tryWorkers(workerUrl, backupUrl, {
+            message: sendMessage,
+            context: context,
+            currentAuthor: message.author.username
         });
         
-        console.log(`📡 Статус: ${response.status}`);
-        
-        const data = await response.json();
-        
-        if (data.reply) {
-            let replyText = data.reply;
-            if (replyText.length > 500) replyText = replyText.substring(0, 497) + "...";
-            await message.reply(replyText);
+        if (replyText) {
+            let finalReply = replyText;
+            if (finalReply.length > 500) finalReply = finalReply.substring(0, 497) + "...";
+            await message.reply(finalReply);
             console.log('✅ Отправлено');
         } else {
-            console.log('🔇 Пустой ответ');
+            console.log('🔇 Молчим');
         }
     } catch (err) {
         console.error('❌ Ошибка:', err.message);
