@@ -60,10 +60,10 @@ const commands = [
             .setMaxValue(100)),
     new SlashCommandBuilder()
         .setName('loversmile')
-        .setDescription('Поставить авто-реакцию на пользователя')
+        .setDescription('Поставить авто-реакции на пользователя')
         .addStringOption(o => o
             .setName('emoji')
-            .setDescription('Эмодзи для реакции')
+            .setDescription('Эмодзи через пробел (например :p_w: :i_w: :d_w: :o_w: :r_w:)')
             .setRequired(true))
         .addUserOption(o => o
             .setName('user')
@@ -138,10 +138,21 @@ client.on('interactionCreate', async (interaction) => {
     }
     
     if (commandName === 'loversmile') {
-        const emoji = interaction.options.getString('emoji');
+        const emojiString = interaction.options.getString('emoji');
         const user = interaction.options.getUser('user');
-        settings.autoReactions[user.id] = emoji;
-        return interaction.editReply({ content: `✅ Реакция ${emoji} будет ставиться на все сообщения ${user.tag}` });
+        
+        // Разбиваем на отдельные эмодзи
+        const emojis = emojiString.split(/\s+/).filter(e => e.trim() !== '');
+        
+        if (emojis.length === 0) {
+            return interaction.editReply({ content: '❌ Укажи хотя бы один эмодзи!' });
+        }
+        
+        settings.autoReactions[user.id] = emojis;
+        
+        return interaction.editReply({ 
+            content: `✅ Реакции ${emojis.join(' ')} будут ставиться на все сообщения ${user.tag}` 
+        });
     }
     
     if (commandName === 'stopsmile') {
@@ -156,12 +167,13 @@ client.on('interactionCreate', async (interaction) => {
             return interaction.editReply({ content: '📋 Список авто-реакций пуст' });
         }
         let list = '';
-        for (const [userId, emoji] of entries) {
+        for (const [userId, emojis] of entries) {
             try {
                 const u = await client.users.fetch(userId);
-                list += `- ${u.tag}: ${emoji}\n`;
+                const emojiStr = Array.isArray(emojis) ? emojis.join(' ') : emojis;
+                list += `- ${u.tag}: ${emojiStr}\n`;
             } catch {
-                list += `- ${userId}: ${emoji}\n`;
+                list += `- ${userId}: ${emojis}\n`;
             }
         }
         return interaction.editReply({ content: `📋 **Авто-реакции:**\n${list}` });
@@ -182,7 +194,7 @@ client.on('interactionCreate', async (interaction) => {
     
     if (commandName === 'help') {
         return interaction.editReply({ 
-            content: `**📋 Команды:**\n/toggle — вкл/выкл\n/roastchance — шанс агро\n/loversmile — авто-реакция\n/stopsmile — убрать реакцию\n/smilelist — список реакций\n/savesettings — сохранить настройки\n/settings — настройки\n/cleanup — очистить команды\n/help — этот список` 
+            content: `**📋 Команды:**\n/toggle — вкл/выкл\n/roastchance — шанс агро\n/loversmile — авто-реакции (можно несколько через пробел)\n/stopsmile — убрать реакции\n/smilelist — список реакций\n/savesettings — сохранить настройки\n/settings — настройки\n/cleanup — очистить команды\n/help — этот список` 
         });
     }
 });
@@ -212,7 +224,17 @@ client.on('messageCreate', async (message) => {
     // Авто-реакции работают всегда
     if (settings.autoReactions[message.author.id]) {
         try {
-            await message.react(settings.autoReactions[message.author.id]);
+            const emojis = settings.autoReactions[message.author.id];
+            if (Array.isArray(emojis)) {
+                // Ставим несколько реакций подряд
+                for (const emoji of emojis) {
+                    await message.react(emoji);
+                    await new Promise(r => setTimeout(r, 200));
+                }
+            } else {
+                // Одна реакция (для обратной совместимости)
+                await message.react(emojis);
+            }
         } catch (e) {
             console.log('❌ Ошибка реакции:', e.message);
         }
