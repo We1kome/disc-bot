@@ -8,6 +8,7 @@ const ROAST_WORKER_BACKUP = process.env.ROAST_WORKER_BACKUP;
 const HELPER_WORKER = process.env.HELPER_WORKER;
 const ROAST_CHANNEL = process.env.ROAST_CHANNEL;
 const HELPER_CHANNEL = process.env.HELPER_CHANNEL;
+const TLIDB_CHANNEL = process.env.TLIDB_CHANNEL || "1500881477339058227"; // Канал для поиска
 
 if (!TOKEN || !CLIENT_ID || !OWNER_ID || !ROAST_WORKER || !ROAST_WORKER_BACKUP || !HELPER_WORKER || !ROAST_CHANNEL || !HELPER_CHANNEL) {
     console.error('Нет всех переменных');
@@ -64,7 +65,6 @@ function buildWheel(heroesArr, highlightIdx = -1, spinEmoji = '🎰', loser = nu
     return `${header}\n${lines.join('\n')}${footer}`;
 }
 
-// ========== УНИВЕРСАЛЬНЫЙ ПАРСЕР TLIDB ==========
 function parseItemPage(html) {
     const seasons = [];
     const progression = [];
@@ -90,12 +90,7 @@ function parseItemPage(html) {
                 let traitDesc = descMatch ? descMatch[1].replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().substring(0, 150) : '';
                 traits.push({ name: traitName, level: traitLevel, description: traitDesc });
             }
-            heroData = {
-                name: nameMatch ? nameMatch[1].trim() : '',
-                image: imgMatch ? imgMatch[1] : '',
-                description: descMatch ? descMatch[1].replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().substring(0, 250) : '',
-                traits
-            };
+            heroData = { name: nameMatch ? nameMatch[1].trim() : '', image: imgMatch ? imgMatch[1] : '', description: descMatch ? descMatch[1].replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().substring(0, 250) : '', traits };
             seasons.push({ season: 'Характеристики', title: heroData.name, image: heroData.image, level: 0, params: {}, tags: ['Герой'], description: heroData.description });
         }
     } else {
@@ -143,55 +138,46 @@ function parseItemPage(html) {
     return { seasons, progression, heroData };
 }
 
-// ========== ПОИСК НА TLIDB ==========
-async function searchTlidb(name, lang = 'ru') {
-    const cleanName = name.replace(/\s+/g, '_').replace(/'/g, '%27');
-    const directUrl = `https://tlidb.com/${lang}/${cleanName}`;
+async function searchTlidb(name, lang) {
+    // Пробуем оба языка если не указан
+    const langs = lang ? [lang] : ['en', 'ru'];
     
-    try {
-        const response = await fetch(directUrl, { redirect: 'manual' });
-        if (response.status === 200) {
-            const html = await response.text();
+    for (const l of langs) {
+        const cleanName = name.replace(/\s+/g, '_').replace(/'/g, '%27');
+        const directUrl = `https://tlidb.com/${l}/${cleanName}`;
+        
+        try {
+            const response = await fetch(directUrl, { redirect: 'manual' });
+            if (response.status === 200) {
+                const html = await response.text();
+                const data = parseItemPage(html);
+                if (data.seasons.length > 0 || data.progression.length > 0) return { ...data, url: directUrl, lang: l };
+            }
+        } catch (e) {}
+        
+        const searchUrl = `https://tlidb.com/${l}/search?q=${encodeURIComponent(name)}`;
+        try {
+            const searchResponse = await fetch(searchUrl);
+            const html = await searchResponse.text();
             const data = parseItemPage(html);
-            if (data.seasons.length > 0 || data.progression.length > 0) return { ...data, url: directUrl };
-        }
-    } catch (e) {}
-    
-    const searchUrl = `https://tlidb.com/${lang}/search?q=${encodeURIComponent(name)}`;
-    const searchResponse = await fetch(searchUrl);
-    const html = await searchResponse.text();
-    const data = parseItemPage(html);
-    
-    if (data.seasons.length === 0 && data.progression.length === 0) {
-        const linkRegex = /<a[^>]*href="(\/[^"]+)"[^>]*>([^<]+)<\/a>/g;
-        let match;
-        const links = [];
-        while ((match = linkRegex.exec(html)) !== null && links.length < 5) {
-            const link = match[1], text = match[2].trim();
-            if (link.includes('/') && text.length > 3 && !text.includes('<')) links.push({ title: text, url: `https://tlidb.com${link}` });
-        }
-        return { ...data, url: searchUrl, suggestions: links };
+            if (data.seasons.length > 0 || data.progression.length > 0) return { ...data, url: searchResponse.url || searchUrl, lang: l };
+        } catch (e) {}
     }
-    return { ...data, url: searchResponse.url || searchUrl };
+    
+    return { seasons: [], progression: [], url: `https://tlidb.com/en/search?q=${encodeURIComponent(name)}`, lang: 'en' };
 }
 
-// ========== ФОРМАТИРОВАНИЕ ==========
-function formatResult(data, topic, action, levels = []) {
-    const { seasons, progression, heroData, url, suggestions } = data;
+function formatResult(data, topic, action, levels = [], query) {
+    const { seasons, progression, heroData, url, lang } = data;
     
     if (seasons.length === 0 && progression.length === 0) {
-        let result = `## ❌ Ничего не найдено\n`;
-        if (suggestions?.length) {
-            result += `**Возможно вы искали:**\n`;
-            suggestions.forEach(s => result += `• [${s.title}](${s.url})\n`);
-        } else result += `[Открыть поиск](${url})`;
-        return result;
+        return `## ❌ Ничего не найдено для "${query || topic}"\n🔗 [Открыть поиск](${url})`;
     }
     
     if (heroData) {
         let result = `## 🦸 ${heroData.name}\n${heroData.description}\n\n### 📋 Характеристики:\n`;
         heroData.traits.forEach(t => result += `**${t.name}** (ур.${t.level})\n${t.description}\n\n`);
-        result += `\n[Открыть](${url})`;
+        result += `\n🔗 [Открыть](${url})`;
         return result.substring(0, 2000);
     }
     
@@ -200,17 +186,17 @@ function formatResult(data, topic, action, levels = []) {
         const row1 = progression.find(r => r.level === lvl1), row2 = progression.find(r => r.level === lvl2);
         if (row1 && row2) {
             const eff1 = parseFloat(row1.efficiency) || 0, eff2 = parseFloat(row2.efficiency) || 0, diff = eff2 - eff1;
-            let result = `## 📊 ${topic}\n**${seasons[0]?.title || ''}**\n\n| Параметр | Ур.${lvl1} | Ур.${lvl2} | Изменение |\n|---|---|---|---|\n`;
+            let result = `## 📊 ${seasons[0]?.title || query}\n| Параметр | Ур.${lvl1} | Ур.${lvl2} | Изменение |\n|---|---|---|---|\n`;
             result += `| Эффективность | ${row1.efficiency} | ${row2.efficiency} | ${diff > 0 ? '📈 +'+diff+'%' : diff < 0 ? '📉 '+diff+'%' : '➡️ 0'} |\n`;
             if (diff !== 0) result += `\n### 🎯 +${diff}% (≈${(diff/(lvl2-lvl1)).toFixed(1)}% за уровень)`;
-            result += `\n[Открыть](${url})`;
+            result += `\n🔗 [Открыть](${url})`;
             return result;
         }
     }
     
     if (action === 'compare' && seasons.length >= 2) {
         const [current, previous] = seasons;
-        let result = `## 📊 ${topic}\n### ${current.season} vs ${previous.season}\n\n| Параметр | ${current.season} | ${previous.season} | Изменение |\n|---|---|---|---|\n`;
+        let result = `## 📊 ${current.season} vs ${previous.season}\n| Параметр | ${current.season} | ${previous.season} | Изменение |\n|---|---|---|---|\n`;
         const allKeys = new Set([...Object.keys(current.params), ...Object.keys(previous.params)]);
         for (const key of allKeys) {
             const curr = current.params[key] || '—', prev = previous.params[key] || '—';
@@ -218,12 +204,12 @@ function formatResult(data, topic, action, levels = []) {
             const change = !isNaN(cNum) && !isNaN(pNum) ? (cNum-pNum > 0 ? '📈 +'+(cNum-pNum) : cNum-pNum < 0 ? '📉 '+(cNum-pNum) : '➡️ 0') : '🔄';
             result += `| ${key} | ${curr} | ${prev} | ${change} |\n`;
         }
-        result += `\n[Открыть](${url})`;
+        result += `\n🔗 [Открыть](${url})`;
         return result;
     }
     
     if (action === 'progression' && progression.length > 0) {
-        let result = `## 📈 ${topic}\n**${seasons[0]?.title || ''}**\n\n| Ур. | Эффект. | Урон | +% |\n|---|---|---|---|\n`;
+        let result = `## 📈 ${seasons[0]?.title || query}\n| Ур. | Эффект. | Урон | +% |\n|---|---|---|---|\n`;
         let prev = 0;
         for (const row of progression.slice(0, 15)) {
             const curr = parseFloat(row.efficiency) || 0;
@@ -231,24 +217,53 @@ function formatResult(data, topic, action, levels = []) {
             prev = curr;
         }
         if (progression.length > 15) result += `| ... | ... | ... | ... |\n`;
-        result += `\n[Открыть](${url})`;
+        result += `\n🔗 [Открыть](${url})`;
         return result;
     }
     
-    let result = `## 🔍 ${topic}\n`;
+    let result = `## 🔍 ${seasons[0]?.title || query}\n`;
     for (const season of seasons.slice(0, 2)) {
-        result += `### 🏷 ${season.season} — ${season.title}\n`;
+        result += `### 🏷 ${season.season}\n`;
         if (season.tags.length) result += `🎯 ${season.tags.join(' · ')}\n`;
         for (const [k, v] of Object.entries(season.params)) result += `• ${k}: **${v}**\n`;
         if (season.description) result += `\n📝 ${season.description}\n`;
         result += `\n`;
     }
     if (progression.length > 0) result += `📊 Доступна прогрессия уровней!\n`;
-    result += `\n[Открыть](${url})`;
+    result += `\n🔗 [Открыть](${url})`;
     return result;
 }
 
-// ========== DISCORD CLIENT ==========
+// Функция для обработки поискового запроса
+async function handleTlidbQuery(query) {
+    // AI извлекает точное название
+    const aiRes = await fetch(HELPER_WORKER, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ 
+            message: `Извлеки ТОЛЬКО точное английское название из запроса о Torchlight Infinite. Запрос: "${query}"
+Ответь одним словом или фразой (например: "Thunder Spike", "Leap Attack", "Gemma", "Mirror").
+Не пиши ничего кроме названия.`,
+            currentAuthor: "user", context: [] 
+        })
+    });
+    
+    let name;
+    try {
+        const t = (await aiRes.json()).reply || '';
+        name = t.replace(/["'`]/g, '').trim();
+        if (name.length < 2 || name.length > 50) name = query;
+    } catch (e) {
+        name = query;
+    }
+    
+    console.log(`🔍 "${query}" → "${name}"`);
+    
+    // Пробуем оба языка
+    const data = await searchTlidb(name, null);
+    const result = formatResult(data, query, 'search', [], name);
+    return result.substring(0, 2000);
+}
+
 const client = new Client({
     intents: [
         GatewayIntentBits.Guilds,
@@ -274,9 +289,7 @@ const commands = [
         .addIntegerOption(o => o.setName('count').setDescription('2-8').setRequired(false).setMinValue(2).setMaxValue(8)),
     new SlashCommandBuilder().setName('quiz').setDescription('Викторина'),
     new SlashCommandBuilder().setName('tlidb').setDescription('Поиск в базе Torchlight Infinite')
-        .addStringOption(o => o.setName('query').setDescription('Что искать (можно криво)').setRequired(true))
-        .addStringOption(o => o.setName('lang').setDescription('Язык').setRequired(false)
-            .addChoices({ name: 'Русский', value: 'ru' }, { name: 'English', value: 'en' })),
+        .addStringOption(o => o.setName('query').setDescription('Что искать').setRequired(true)),
     new SlashCommandBuilder().setName('savesettings').setDescription('Сохранить'),
     new SlashCommandBuilder().setName('settings').setDescription('Настройки'),
     new SlashCommandBuilder().setName('cleanup').setDescription('Очистка'),
@@ -287,6 +300,7 @@ const rest = new REST({ version: '10' }).setToken(TOKEN);
 
 client.on('ready', async () => {
     console.log('✅ Бот:', client.user.tag);
+    console.log('📋 TLIDB канал:', TLIDB_CHANNEL);
     await rest.put(Routes.applicationCommands(CLIENT_ID), { body: commands });
 });
 
@@ -324,37 +338,11 @@ client.on('interactionCreate', async (interaction) => {
         return;
     }
     
-    // ========== TLIDB ==========
     if (commandName === 'tlidb') {
         await interaction.deferReply();
         const query = interaction.options.getString('query');
-        const forcedLang = interaction.options.getString('lang');
-        
-        const aiRes = await fetch(HELPER_WORKER, {
-            method: "POST", headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ 
-                message: `Извлеки из запроса ТОЛЬКО точное название (1-3 слова) и действие. Запрос: "${query}"
-Ответь СТРОГО JSON: {"name":"название","lang":"ru/en","action":"search/compare/progression/level_diff","levels":[числа]}
-Примеры:
-"тандер спайк найди" → {"name":"Thunder Spike","lang":"en","action":"search","levels":[]}
-"Thunder Spike 21 35" → {"name":"Thunder Spike","lang":"en","action":"level_diff","levels":[21,35]}
-"лип атак 20 21" → {"name":"Атака в прыжке","lang":"ru","action":"level_diff","levels":[20,21]}
-"что поменяли у геммы" → {"name":"Gemma","lang":"en","action":"compare","levels":[]}`,
-                currentAuthor: interaction.user.username, context: [] 
-            })
-        });
-        
-        let aiData;
-        try { const t = (await aiRes.json()).reply || ''; const m = t.match(/\{[\s\S]*\}/); aiData = m ? JSON.parse(m[0]) : { name: query, lang: forcedLang || 'en', action: 'search', levels: [], topic: query }; } catch (e) { aiData = { name: query, lang: forcedLang || 'en', action: 'search', levels: [], topic: query }; }
-        
-        const { name, lang, action, levels } = aiData;
-        console.log(`🔍 "${query}" → "${name}" [${lang}] ${action} ур.${(levels||[]).join(',')}`);
-        
-        try {
-            const data = await searchTlidb(name, lang);
-            const result = formatResult(data, query, action, levels || []);
-            await interaction.editReply({ content: result.substring(0, 2000) });
-        } catch (e) { await interaction.editReply({ content: `❌ Ошибка: ${e.message}` }); }
+        const result = await handleTlidbQuery(query);
+        await interaction.editReply({ content: result });
         return;
     }
     
@@ -426,6 +414,8 @@ client.on('messageReactionRemove', async (reaction, user) => {
 
 client.on('messageCreate', async (message) => {
     if (message.author.bot) return;
+    
+    // Авто-реакции
     if (settings.autoReactions[message.author.id]) {
         try {
             const arr = Array.isArray(settings.autoReactions[message.author.id]) ? settings.autoReactions[message.author.id] : [settings.autoReactions[message.author.id]];
@@ -435,10 +425,26 @@ client.on('messageCreate', async (message) => {
             }
         } catch (e) {}
     }
+    
+    // Канал TLIDB — отвечаем на все сообщения как на поисковые запросы
+    if (message.channel.id === TLIDB_CHANNEL && !message.content.startsWith('/') && message.content.length > 2) {
+        console.log(`🔍 TLIDB авто: "${message.content}"`);
+        try {
+            const result = await handleTlidbQuery(message.content);
+            await message.reply(result.substring(0, 2000));
+            console.log('✅ TLIDB ответ отправлен');
+        } catch (e) {
+            console.error('❌ TLIDB ошибка:', e.message);
+        }
+        return;
+    }
+    
     if (!settings.enabled) return;
     if (message.content.startsWith('/')) return;
+    
     const channelId = message.channel.id;
     let workerUrl, backupUrl;
+    
     if (channelId === ROAST_CHANNEL) {
         if (Math.random() * 100 > settings.roastChance) return;
         workerUrl = ROAST_WORKER;
@@ -447,6 +453,7 @@ client.on('messageCreate', async (message) => {
         workerUrl = HELPER_WORKER;
         backupUrl = HELPER_WORKER;
     } else return;
+    
     try {
         const messages = await message.channel.messages.fetch({ limit: 2 });
         const context = [];
