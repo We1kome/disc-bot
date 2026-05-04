@@ -20,7 +20,7 @@ if (process.env.BOT_SETTINGS) {
 }
 
 const heroes = [
-    { name: "Rehan", title: "Berserker", emoji: "🪓" },
+    { name: "Rehan", title: "Berserker | Anger", emoji: "🪓" },
     { name: "Rehan", title: "Seething Silhouette", emoji: "👻" },
     { name: "Carino", title: "Ranger of Glory", emoji: "🏹" },
     { name: "Carino", title: "Lethal Flash", emoji: "💥" },
@@ -45,11 +45,10 @@ const heroes = [
     { name: "Iris", title: "Growing Breeze", emoji: "🌿" },
     { name: "Iris", title: "Vigilant Breeze", emoji: "💨" },
     { name: "Selena", title: "Sing with the Tide", emoji: "🌊" },
-    { name: "Sage", title: "Scent Weaver", emoji: "🎵" }
+    { name: "Sage", title: "Scent Weaver | Licorice Note", emoji: "🎵" }
 ];
 
 function buildWheel(heroesArr, highlightIdx = -1, spinEmoji = '🎰', loser = null) {
-    const numIcons = ['1️⃣','2️⃣','3️⃣','4️⃣','5️⃣','6️⃣','7️⃣','8️⃣'];
     let lines = [];
     heroesArr.forEach((h, i) => {
         let prefix = ' ';
@@ -86,9 +85,13 @@ const commands = [
     new SlashCommandBuilder().setName('stopsmile').setDescription('Убрать реакцию')
         .addUserOption(o => o.setName('user').setDescription('Пользователь').setRequired(true)),
     new SlashCommandBuilder().setName('smilelist').setDescription('Список реакций'),
-    new SlashCommandBuilder().setName('wheel').setDescription('Колесо на выбывание')
+    new SlashCommandBuilder().setName('wheel').setDescription('Колесо героев')
         .addIntegerOption(o => o.setName('count').setDescription('2-8').setRequired(false).setMinValue(2).setMaxValue(8)),
     new SlashCommandBuilder().setName('quiz').setDescription('Викторина'),
+    new SlashCommandBuilder().setName('tlidb').setDescription('Поиск в базе Torchlight Infinite')
+        .addStringOption(o => o.setName('query').setDescription('Что искать (можно криво)').setRequired(true))
+        .addStringOption(o => o.setName('lang').setDescription('Язык').setRequired(false)
+            .addChoices({ name: 'Русский', value: 'ru' }, { name: 'English', value: 'en' })),
     new SlashCommandBuilder().setName('savesettings').setDescription('Сохранить'),
     new SlashCommandBuilder().setName('settings').setDescription('Настройки'),
     new SlashCommandBuilder().setName('cleanup').setDescription('Очистка'),
@@ -104,7 +107,7 @@ client.on('ready', async () => {
 
 client.on('interactionCreate', async (interaction) => {
     if (!interaction.isChatInputCommand()) return;
-    if (interaction.user.id !== OWNER_ID && interaction.commandName !== 'quiz') {
+    if (interaction.user.id !== OWNER_ID && !['quiz', 'tlidb'].includes(interaction.commandName)) {
         return interaction.reply({ content: 'Нет прав', flags: 64 });
     }
     
@@ -148,6 +151,77 @@ client.on('interactionCreate', async (interaction) => {
         return;
     }
     
+    // tlidb - доступна всем
+    if (commandName === 'tlidb') {
+        await interaction.deferReply();
+        const query = interaction.options.getString('query');
+        const lang = interaction.options.getString('lang') || 'ru';
+        
+        // Сначала AI исправляет кривой запрос
+        const fixRes = await fetch(HELPER_WORKER, {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ 
+                message: `Пользователь ищет в Torchlight Infinite: "${query}". Исправь на правильное английское название предмета/скилла/героя. Ответь ТОЛЬКО правильным названием, одним словом или фразой. Например: "лип слам" → "Leap Attack", "миррор" → "Mirror", "хх" → "Headhunter".`, 
+                currentAuthor: interaction.user.username, context: [] 
+            })
+        });
+        const fixData = await fixRes.json();
+        const fixedQuery = fixData.reply || query;
+        
+        console.log(`🔍 Исправлено: "${query}" → "${fixedQuery}"`);
+        
+        // Ищем на tlidb
+        const tlidbUrl = `https://tlidb.com/${lang}/search?q=${encodeURIComponent(fixedQuery)}`;
+        
+        try {
+            const tlidbRes = await fetch(tlidbUrl);
+            const html = await tlidbRes.text();
+            
+            // Парсим результаты
+            const results = [];
+            const cardRegex = /<div class="card ui_item[^"]*">([\s\S]*?)<\/div>\s*<\/div>\s*<\/div>/g;
+            let match;
+            
+            while ((match = cardRegex.exec(html)) !== null) {
+                const card = match[1];
+                const titleMatch = card.match(/<h5[^>]*>([^<]+)<\/h5>/);
+                const imgMatch = card.match(/<img[^>]*src="([^"]+)"[^>]*>/);
+                const title = titleMatch ? titleMatch[1].trim() : '';
+                const image = imgMatch ? imgMatch[1] : '';
+                
+                const tags = [];
+                const tagRegex = /<span class="[^"]*tag[^"]*">([^<]+)<\/span>/g;
+                let tagMatch;
+                while ((tagMatch = tagRegex.exec(card)) !== null) {
+                    tags.push(tagMatch[1].trim());
+                }
+                
+                const descMatch = card.match(/<div class="explicitMod">([\s\S]*?)<\/div>/);
+                let description = descMatch ? descMatch[1].replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim() : '';
+                
+                if (title) {
+                    results.push({ title, image, tags, description: description.substring(0, 250) });
+                }
+            }
+            
+            if (results.length > 0) {
+                let reply = `🔍 **${fixedQuery}**\n`;
+                results.slice(0, 3).forEach((r, i) => {
+                    reply += `\n**${i+1}. ${r.title}**\n`;
+                    if (r.tags.length) reply += `🏷 ${r.tags.join(', ')}\n`;
+                    if (r.description) reply += `📝 ${r.description}\n`;
+                });
+                reply += `\n🔗 https://tlidb.com/${lang}/search?q=${encodeURIComponent(fixedQuery)}`;
+                await interaction.editReply({ content: reply.substring(0, 2000) });
+            } else {
+                await interaction.editReply({ content: `❌ Ничего не найдено по "${fixedQuery}"\n🔗 https://tlidb.com/${lang}/search?q=${encodeURIComponent(fixedQuery)}` });
+            }
+        } catch (e) {
+            await interaction.editReply({ content: `❌ Ошибка поиска: ${e.message}` });
+        }
+        return;
+    }
+    
     await interaction.deferReply({ flags: 64 });
     
     if (commandName === 'toggle') {
@@ -174,12 +248,11 @@ client.on('interactionCreate', async (interaction) => {
         if (!entries.length) return interaction.editReply({ content: '📋 Пусто' });
         return interaction.editReply({ content: entries.map(([id, e]) => `${Array.isArray(e)?e.join(' '):e} → <@${id}>`).join('\n') });
     }
-    
     if (commandName === 'wheel') {
         const count = interaction.options.getInteger('count') || 5;
         const heroList = heroes.map((h, i) => `${i+1}. ${h.emoji} **${h.name}**`).join('\n');
         
-        await interaction.editReply({ content: `# 🎯 ВЫБОР ГЕРОЕВ\n${heroList}\n\n**Напиши номера через пробел** (минимум 2)\n_30 секунд!_` });
+        await interaction.editReply({ content: `# 🎯 ВЫБОР ГЕРОЕВ\n${heroList}\n\n**Напиши номера через пробел**\n_30 секунд!_` });
         
         const filter = m => m.author.id === interaction.user.id;
         const collector = interaction.channel.createMessageCollector({ filter, time: 30000, max: 1 });
@@ -198,7 +271,6 @@ client.on('interactionCreate', async (interaction) => {
             reactCollector.on('collect', async (reaction, user) => {
                 if (wheelHeroes.length <= 1) { reactCollector.stop(); return; }
                 
-                // Анимация
                 for (let spin = 0; spin < 5; spin++) {
                     await new Promise(r => setTimeout(r, 300));
                     const shifted = [...wheelHeroes];
@@ -208,23 +280,17 @@ client.on('interactionCreate', async (interaction) => {
                 }
                 
                 await new Promise(r => setTimeout(r, 500));
-                const loserIdx = Math.floor(Math.random() * wheelHeroes.length);
-                const loser = wheelHeroes.splice(loserIdx, 1)[0];
-                
+                const loser = wheelHeroes.splice(Math.floor(Math.random() * wheelHeroes.length), 1)[0];
                 await wheelMsg.edit({ content: buildWheel(wheelHeroes, -1, '🎯', loser) });
-                
-                if (wheelHeroes.length === 1) {
-                    reactCollector.stop();
-                }
+                if (wheelHeroes.length === 1) reactCollector.stop();
             });
         });
         collector.on('end', c => { if (!c.size) interaction.followUp({ content: 'Время вышло!', flags: 64 }); });
         return;
     }
-    
     if (commandName === 'savesettings') return interaction.editReply({ content: `BOT_SETTINGS=\n${JSON.stringify(settings)}` });
     if (commandName === 'settings') return interaction.editReply({ content: `Вкл: ${settings.enabled}\nШанс: ${settings.roastChance}%\nРеакций: ${Object.keys(settings.autoReactions).length}` });
-    if (commandName === 'help') return interaction.editReply({ content: '/toggle /roastchance /loversmile /stopsmile /smilelist /wheel /quiz /savesettings /settings /cleanup /help' });
+    if (commandName === 'help') return interaction.editReply({ content: '/toggle /roastchance /loversmile /stopsmile /smilelist /wheel /quiz /tlidb /savesettings /settings /cleanup /help' });
 });
 
 client.on('messageReactionRemove', async (reaction, user) => {
@@ -235,8 +301,7 @@ client.on('messageReactionRemove', async (reaction, user) => {
             const emojis = settings.autoReactions[msg.author.id];
             const arr = Array.isArray(emojis) ? emojis : [emojis];
             for (const emoji of arr) {
-                const clean = emoji.replace(/<a?:.*?:\d+>/g, '');
-                if (!msg.reactions.cache.some(r => r.emoji.name === clean || r.emoji.toString() === emoji)) {
+                if (!msg.reactions.cache.some(r => r.emoji.toString() === emoji)) {
                     await msg.react(emoji);
                 }
             }
@@ -249,8 +314,7 @@ client.on('messageCreate', async (message) => {
     
     if (settings.autoReactions[message.author.id]) {
         try {
-            const emojis = settings.autoReactions[message.author.id];
-            const arr = Array.isArray(emojis) ? emojis : [emojis];
+            const arr = Array.isArray(settings.autoReactions[message.author.id]) ? settings.autoReactions[message.author.id] : [settings.autoReactions[message.author.id]];
             for (const emoji of arr) {
                 await message.react(emoji);
                 await new Promise(r => setTimeout(r, 200));
