@@ -21,33 +21,43 @@ if (process.env.BOT_SETTINGS) {
 }
 
 const heroes = [
-    { name: "Rehan", title: "Berserker | Anger", emoji: "🪓" },
-    { name: "Rehan", title: "Seething Silhouette", emoji: "👻" },
-    { name: "Carino", title: "Ranger of Glory", emoji: "🏹" },
-    { name: "Carino", title: "Lethal Flash", emoji: "💥" },
-    { name: "Carino", title: "Zealot of War", emoji: "⚔️" },
-    { name: "Erika", title: "Wind Stalker", emoji: "🌪️" },
-    { name: "Erika", title: "Lightning Shadow", emoji: "⚡" },
-    { name: "Erika", title: "Vendetta's Sting", emoji: "🗡️" },
-    { name: "Bing", title: "Blast Nova", emoji: "💣" },
-    { name: "Bing", title: "Creative Genius", emoji: "🧠" },
-    { name: "Gemma", title: "Flame of Pleasure", emoji: "🔥" },
-    { name: "Gemma", title: "Frostbitten Heart", emoji: "❄️" },
-    { name: "Gemma", title: "Ice-Fire Fusion", emoji: "🌊" },
-    { name: "Thea", title: "Wisdom of The Gods", emoji: "🦉" },
-    { name: "Thea", title: "Incarnation of The Gods", emoji: "👼" },
-    { name: "Thea", title: "Blasphemer", emoji: "😈" },
-    { name: "Youga", title: "Spacetime Illusion", emoji: "🌀" },
-    { name: "Youga", title: "Spacetime Elapse", emoji: "⏳" },
-    { name: "Moto", title: "Order Calling", emoji: "🤖" },
-    { name: "Moto", title: "Charge Calling", emoji: "💥" },
-    { name: "Rosa", title: "High Court Chariot", emoji: "🛡️" },
-    { name: "Rosa", title: "Unsullied Blade", emoji: "⚔️" },
-    { name: "Iris", title: "Growing Breeze", emoji: "🌿" },
-    { name: "Iris", title: "Vigilant Breeze", emoji: "💨" },
-    { name: "Selena", title: "Sing with the Tide", emoji: "🌊" },
-    { name: "Sage", title: "Scent Weaver | Licorice Note", emoji: "🎵" }
+    { name: "Rehan", title: "Berserker | Anger", emoji: "🪓", id: "Anger" },
+    { name: "Rehan", title: "Seething Silhouette", emoji: "👻", id: "Seething_Silhouette" },
+    { name: "Carino", title: "Ranger of Glory", emoji: "🏹", id: "Ranger_of_Glory" },
+    { name: "Carino", title: "Lethal Flash", emoji: "💥", id: "Lethal_Flash" },
+    { name: "Carino", title: "Zealot of War", emoji: "⚔️", id: "Zealot_of_War" },
+    { name: "Erika", title: "Wind Stalker", emoji: "🌪️", id: "Wind_Stalker" },
+    { name: "Erika", title: "Lightning Shadow", emoji: "⚡", id: "Lightning_Shadow" },
+    { name: "Erika", title: "Vendetta's Sting", emoji: "🗡️", id: "Vendetta%27s_Sting" },
+    { name: "Bing", title: "Blast Nova", emoji: "💣", id: "Blast_Nova" },
+    { name: "Bing", title: "Creative Genius", emoji: "🧠", id: "Creative_Genius" },
+    { name: "Gemma", title: "Flame of Pleasure", emoji: "🔥", id: "Flame_of_Pleasure" },
+    { name: "Gemma", title: "Frostbitten Heart", emoji: "❄️", id: "Frostbitten_Heart" },
+    { name: "Gemma", title: "Ice-Fire Fusion", emoji: "🌊", id: "Ice-Fire_Fusion" },
+    { name: "Thea", title: "Wisdom of The Gods", emoji: "🦉", id: "Wisdom_of_The_Gods" },
+    { name: "Thea", title: "Incarnation of The Gods", emoji: "👼", id: "Incarnation_of_the_Gods" },
+    { name: "Thea", title: "Blasphemer", emoji: "😈", id: "Blasphemer" },
+    { name: "Youga", title: "Spacetime Illusion", emoji: "🌀", id: "Spacetime_Illusion" },
+    { name: "Youga", title: "Spacetime Elapse", emoji: "⏳", id: "Spacetime_Elapse" },
+    { name: "Moto", title: "Order Calling", emoji: "🤖", id: "Order_Calling" },
+    { name: "Moto", title: "Charge Calling", emoji: "💥", id: "Charge_Calling" },
+    { name: "Rosa", title: "High Court Chariot", emoji: "🛡️", id: "High_Court_Chariot" },
+    { name: "Rosa", title: "Unsullied Blade", emoji: "⚔️", id: "Unsullied_Blade" },
+    { name: "Iris", title: "Growing Breeze", emoji: "🌿", id: "Growing_Breeze" },
+    { name: "Iris", title: "Vigilant Breeze", emoji: "💨", id: "Vigilant_Breeze" },
+    { name: "Selena", title: "Sing with the Tide", emoji: "🌊", id: "Sing_with_the_Tide" },
+    { name: "Sage", title: "Scent Weaver | Licorice Note", emoji: "🎵", id: "Licorice_Note" }
 ];
+
+// Считаем повторы и добавляем номера
+function getHeroDisplay(hero, index, allHeroes) {
+    const sameNameCount = allHeroes.filter(h => h.name === hero.name).length;
+    if (sameNameCount > 1) {
+        const sameBefore = allHeroes.slice(0, index).filter(h => h.name === hero.name).length;
+        return `${hero.name} ${sameBefore + 1}`;
+    }
+    return hero.name;
+}
 
 function buildWheel(heroesArr, highlightIdx = -1, spinEmoji = '🎰', loser = null) {
     let lines = [];
@@ -55,13 +65,17 @@ function buildWheel(heroesArr, highlightIdx = -1, spinEmoji = '🎰', loser = nu
         let prefix = ' ';
         if (i === highlightIdx && !loser) prefix = '👉';
         if (loser && h === loser) prefix = '❌';
-        lines.push(`${prefix} ${h.emoji} **${h.name}**`);
+        const displayName = getHeroDisplay(h, heroes.indexOf(h), heroes);
+        lines.push(`${prefix} ${h.emoji} **${displayName}**`);
     });
     let header = `## ${spinEmoji} КОЛЕСО ФОРТУНЫ ${spinEmoji}`;
     let footer = loser 
-        ? `\n❌ Выбыл: ${loser.emoji} **${loser.name}**\nОсталось: **${heroesArr.length}** | Жми 🎲`
+        ? `\n❌ Выбыл: ${loser.emoji} **${getHeroDisplay(loser, heroes.indexOf(loser), heroes)}**\nОсталось: **${heroesArr.length}** | Жми 🎲`
         : `\nГероев: **${heroesArr.length}** | Жми 🎲 крутить!`;
-    if (heroesArr.length === 1) footer = `\n## 🏆 ПОБЕДИТЕЛЬ: ${heroesArr[0].emoji} **${heroesArr[0].name}**!`;
+    if (heroesArr.length === 1) {
+        const winner = heroesArr[0];
+        footer = `\n## 🏆 ПОБЕДИТЕЛЬ: ${winner.emoji} **${getHeroDisplay(winner, heroes.indexOf(winner), heroes)}** — ${winner.title}!`;
+    }
     return `${header}\n${lines.join('\n')}${footer}`;
 }
 
@@ -138,41 +152,154 @@ function parseItemPage(html) {
     return { seasons, progression, heroData };
 }
 
-async function searchTlidb(name) {
-    // Пробуем en, потом ru
-    for (const lang of ['en', 'ru']) {
-        const cleanName = name.replace(/\s+/g, '_').replace(/'/g, '%27');
-        const directUrl = `https://tlidb.com/${lang}/${cleanName}`;
-        
-        try {
-            const response = await fetch(directUrl, { redirect: 'manual' });
-            if (response.status === 200) {
-                const html = await response.text();
-                const data = parseItemPage(html);
-                if (data.seasons.length > 0 || data.progression.length > 0) return { ...data, url: directUrl };
-            }
-        } catch (e) {}
-    }
+// Прямой поиск по URL
+async function searchTlidbDirect(name, lang) {
+    const cleanName = name.replace(/\s+/g, '_').replace(/'/g, '%27');
+    const url = `https://tlidb.com/${lang}/${cleanName}`;
     
-    // Поиск на обоих языках
-    for (const lang of ['en', 'ru']) {
-        const searchUrl = `https://tlidb.com/${lang}/search?q=${encodeURIComponent(name)}`;
-        try {
-            const searchResponse = await fetch(searchUrl);
-            const html = await searchResponse.text();
+    try {
+        const response = await fetch(url);
+        if (response.ok && !response.url.includes('/search')) {
+            const html = await response.text();
             const data = parseItemPage(html);
-            if (data.seasons.length > 0 || data.progression.length > 0) return { ...data, url: searchResponse.url || searchUrl };
-        } catch (e) {}
+            if (data.seasons.length > 0 || data.progression.length > 0) {
+                return { ...data, url, found: true };
+            }
+        }
+    } catch (e) {}
+    return { seasons: [], progression: [], url, found: false };
+}
+
+// Поиск через поисковую строку сайта (для нечётких запросов)
+async function searchTlidbSearch(name, lang) {
+    const url = `https://tlidb.com/${lang}/search?q=${encodeURIComponent(name)}`;
+    try {
+        const response = await fetch(url);
+        const html = await response.text();
+        
+        // Если поиск перенаправил на конкретную страницу
+        if (response.url && !response.url.includes('/search')) {
+            const data = parseItemPage(html);
+            if (data.seasons.length > 0 || data.progression.length > 0) {
+                return { ...data, url: response.url, found: true };
+            }
+        }
+        
+        const data = parseItemPage(html);
+        
+        // Ищем ссылки в результатах
+        const links = [];
+        const linkRegex = /<a[^>]*href="(\/(?:ru|en)\/[^"]+)"[^>]*>([^<]+)<\/a>/g;
+        let match;
+        while ((match = linkRegex.exec(html)) !== null && links.length < 5) {
+            const link = match[1], text = match[2].trim();
+            if (text.length > 2 && !text.includes('<')) {
+                links.push({ title: text, url: `https://tlidb.com${link}` });
+            }
+        }
+        
+        if (data.seasons.length > 0 || data.progression.length > 0) {
+            return { ...data, url: response.url || url, found: true };
+        }
+        
+        return { ...data, url, found: false, suggestions: links };
+    } catch (e) {
+        return { seasons: [], progression: [], url, found: false };
+    }
+}
+
+// Умный поиск: AI переводит запрос в правильное название
+async function smartSearch(query) {
+    console.log(`🔍 Запрос: "${query}"`);
+    
+    // Шаг 1: AI переводит запрос в точное английское название
+    const aiRes = await fetch(HELPER_WORKER, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ 
+            message: `Ты — переводчик для базы данных Torchlight Infinite. Переведи запрос игрока в ТОЧНОЕ английское название предмета/скилла/героя.
+
+Запрос: "${query}"
+
+Правила:
+- "тандер спайк" → "Thunder Spike"
+- "лип атак" → "Leap Attack"  
+- "хх" → "Headhunter"
+- "миррор" → "Mirror"
+- "тандер спайк намб" → "Thunder Spike: Numb (Magnificent)" или "Thunder Spike Numb"
+- "молниевый удар" → "Thunder Spike"
+- Если не знаешь точное название — напиши "UNKNOWN"
+
+Ответь ТОЛЬКО названием.`,
+            currentAuthor: "user", context: [] 
+        })
+    });
+    
+    let exactName = query;
+    try {
+        const t = (await aiRes.json()).reply || '';
+        exactName = t.replace(/["'`]/g, '').trim();
+        if (exactName === 'UNKNOWN' || exactName.length < 2 || exactName.length > 80) exactName = query;
+    } catch (e) {}
+    
+    console.log(`🔍 AI перевёл: "${query}" → "${exactName}"`);
+    
+    // Шаг 2: Пробуем прямой URL на en
+    let result = await searchTlidbDirect(exactName, 'en');
+    if (result.found) {
+        console.log(`✅ Найдено через en прямой URL`);
+        return { ...result, searchName: exactName };
     }
     
-    return { seasons: [], progression: [], url: `https://tlidb.com/en/search?q=${encodeURIComponent(name)}` };
+    // Шаг 3: Пробуем прямой URL на ru
+    result = await searchTlidbDirect(exactName, 'ru');
+    if (result.found) {
+        console.log(`✅ Найдено через ru прямой URL`);
+        return { ...result, searchName: exactName };
+    }
+    
+    // Шаг 4: Пробуем поиск на en
+    result = await searchTlidbSearch(exactName, 'en');
+    if (result.found) {
+        console.log(`✅ Найдено через en поиск`);
+        return { ...result, searchName: exactName };
+    }
+    
+    // Шаг 5: Пробуем поиск на ru
+    result = await searchTlidbSearch(exactName, 'ru');
+    if (result.found) {
+        console.log(`✅ Найдено через ru поиск`);
+        return { ...result, searchName: exactName };
+    }
+    
+    // Шаг 6: Пробуем исходный запрос (если AI не справился)
+    if (exactName !== query) {
+        result = await searchTlidbSearch(query, 'en');
+        if (result.found) {
+            console.log(`✅ Найдено через исходный запрос en`);
+            return { ...result, searchName: query };
+        }
+        result = await searchTlidbSearch(query, 'ru');
+        if (result.found) {
+            console.log(`✅ Найдено через исходный запрос ru`);
+            return { ...result, searchName: query };
+        }
+    }
+    
+    console.log(`❌ Ничего не найдено`);
+    return { seasons: [], progression: [], url: `https://tlidb.com/en/search?q=${encodeURIComponent(exactName)}`, found: false, searchName: exactName, suggestions: result?.suggestions || [] };
 }
 
 function formatResult(data, query) {
-    const { seasons, progression, heroData, url } = data;
+    const { seasons, progression, heroData, url, found, suggestions, searchName } = data;
     
-    if (seasons.length === 0 && progression.length === 0) {
-        return `## ❌ Ничего не найдено для "${query}"\n🔗 [Открыть поиск](${url})`;
+    if (!found && seasons.length === 0 && progression.length === 0) {
+        let result = `## ❌ Ничего не найдено\nИскал: **${searchName || query}**\n`;
+        if (suggestions?.length) {
+            result += `\n**Возможно вы искали:**\n`;
+            suggestions.forEach(s => result += `• [${s.title}](${s.url})\n`);
+        }
+        result += `\n🔗 [Открыть поиск](${url})`;
+        return result.substring(0, 2000);
     }
     
     if (heroData) {
@@ -182,7 +309,7 @@ function formatResult(data, query) {
         return result.substring(0, 2000);
     }
     
-    let result = `## 🔍 ${seasons[0]?.title || query}\n`;
+    let result = `## 🔍 ${seasons[0]?.title || searchName}\n`;
     for (const season of seasons.slice(0, 2)) {
         result += `### 🏷 ${season.season}\n`;
         if (season.tags.length) result += `🎯 ${season.tags.join(' · ')}\n`;
@@ -195,33 +322,8 @@ function formatResult(data, query) {
         const first = progression[0], last = progression[progression.length-1];
         result += `ур.${first.level} (${first.efficiency}) → ур.${last.level} (${last.efficiency})\n`;
     }
-    result += `\n🔗 [Открыть](${url})`;
+    result += `\n🔗 [Открыть на tlidb](${url})`;
     return result.substring(0, 2000);
-}
-
-async function handleTlidbQuery(query) {
-    console.log(`🔍 Поиск: "${query}"`);
-    
-    // AI извлекает точное название
-    const aiRes = await fetch(HELPER_WORKER, {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ 
-            message: `Извлеки ТОЛЬКО точное название из запроса. Запрос: "${query}". Ответь одним словом или фразой на английском. Например: "Thunder Spike", "Leap Attack", "Gemma".`,
-            currentAuthor: "user", context: [] 
-        })
-    });
-    
-    let name = query;
-    try {
-        const t = (await aiRes.json()).reply || '';
-        name = t.replace(/["'`]/g, '').trim();
-        if (name.length < 2 || name.length > 60) name = query;
-    } catch (e) {}
-    
-    console.log(`🔍 Извлечено: "${name}"`);
-    
-    const data = await searchTlidb(name);
-    return formatResult(data, query);
 }
 
 const client = new Client({
@@ -284,8 +386,7 @@ client.on('interactionCreate', async (interaction) => {
         const qRes = await fetch(HELPER_WORKER, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ message: "Придумай лёгкий вопрос с юмором. Только вопрос.", currentAuthor: interaction.user.username, context: [] }) });
         const qData = await qRes.json();
         const question = qData.reply || "2+2?";
-        const prizes = ["💎 1000 FE", "🔮 Красный кристалл", "🔥 Легендарка", "👑 Титул"];
-        await interaction.editReply({ content: `# 🎉 ВИКТОРИНА!\n## Приз: ${prizes[Math.floor(Math.random()*4)]}\n❓ ${question}\n_30 секунд!_` });
+        await interaction.editReply({ content: `# 🎉 ВИКТОРИНА!\n## Приз: 💎 1000 FE\n❓ ${question}\n_30 секунд!_` });
         const collector = interaction.channel.createMessageCollector({ filter: m => !m.author.bot, time: 30000 });
         collector.on('collect', async (m) => {
             const jRes = await fetch(HELPER_WORKER, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ message: `Вопрос: "${question}". ${m.author.username}: "${m.content}". Если правильно - обмани что выиграл приз, оскорби. Начни с "Поздравляю!"`, currentAuthor: m.author.username, context: [] }) });
@@ -314,7 +415,7 @@ client.on('interactionCreate', async (interaction) => {
     }
     if (commandName === 'wheel') {
         const count = interaction.options.getInteger('count') || 5;
-        const heroList = heroes.map((h, i) => `${i+1}. ${h.emoji} **${h.name}**`).join('\n');
+        const heroList = heroes.map((h, i) => `${i+1}. ${h.emoji} **${getHeroDisplay(h, i, heroes)}** — ${h.title}`).join('\n');
         await interaction.editReply({ content: `# 🎯 ВЫБОР ГЕРОЕВ\n${heroList}\n\n**Напиши номера через пробел**\n_30 секунд!_` });
         const filter = m => m.author.id === interaction.user.id;
         const collector = interaction.channel.createMessageCollector({ filter, time: 30000, max: 1 });
@@ -377,14 +478,16 @@ client.on('messageCreate', async (message) => {
     
     // КАНАЛ TLIDB — авто-поиск
     if (message.channel.id === TLIDB_CHANNEL && !message.content.startsWith('/') && message.content.length > 2) {
-        console.log(`📨 TLIDB: "${message.content}" от ${message.author.username}`);
+        console.log(`📨 TLIDB: "${message.content}"`);
         try {
             await message.channel.sendTyping();
-            const result = await handleTlidbQuery(message.content);
+            const data = await smartSearch(message.content);
+            const result = formatResult(data, message.content);
             await message.reply(result.substring(0, 2000));
             console.log('✅ TLIDB ответ');
         } catch (e) {
             console.error('❌ TLIDB:', e.message);
+            await message.reply('❌ Ошибка поиска. Попробуй другой запрос.');
         }
         return;
     }
