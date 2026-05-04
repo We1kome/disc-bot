@@ -15,10 +15,13 @@ if (!TOKEN || !CLIENT_ID || !OWNER_ID || !ROAST_WORKER || !ROAST_WORKER_BACKUP |
     process.exit(1);
 }
 
-let settings = { enabled: true, roastChance: 20, autoReactions: {} };
+let settings = { enabled: true, roastChance: 20, autoReactions: {}, admins: [] };
 if (process.env.BOT_SETTINGS) {
-    try { settings = JSON.parse(process.env.BOT_SETTINGS); } catch (e) {}
+    try { settings = JSON.parse(process.env.BOT_SETTINGS); if (!settings.admins) settings.admins = []; } catch (e) {}
 }
+
+function isOwner(userId) { return userId === OWNER_ID; }
+function isAdmin(userId) { return userId === OWNER_ID || settings.admins.includes(userId); }
 
 const heroes = [
     { name: "Rehan", title: "Berserker | Anger", emoji: "🪓", id: "Anger" },
@@ -49,7 +52,6 @@ const heroes = [
     { name: "Sage", title: "Scent Weaver | Licorice Note", emoji: "🎵", id: "Licorice_Note" }
 ];
 
-// Считаем повторы и добавляем номера
 function getHeroDisplay(hero, index, allHeroes) {
     const sameNameCount = allHeroes.filter(h => h.name === hero.name).length;
     if (sameNameCount > 1) {
@@ -152,164 +154,75 @@ function parseItemPage(html) {
     return { seasons, progression, heroData };
 }
 
-// Прямой поиск по URL
 async function searchTlidbDirect(name, lang) {
     const cleanName = name.replace(/\s+/g, '_').replace(/'/g, '%27');
     const url = `https://tlidb.com/${lang}/${cleanName}`;
-    
     try {
         const response = await fetch(url);
         if (response.ok && !response.url.includes('/search')) {
             const html = await response.text();
             const data = parseItemPage(html);
-            if (data.seasons.length > 0 || data.progression.length > 0) {
-                return { ...data, url, found: true };
-            }
+            if (data.seasons.length > 0 || data.progression.length > 0) return { ...data, url, found: true };
         }
     } catch (e) {}
     return { seasons: [], progression: [], url, found: false };
 }
 
-// Поиск через поисковую строку сайта (для нечётких запросов)
 async function searchTlidbSearch(name, lang) {
     const url = `https://tlidb.com/${lang}/search?q=${encodeURIComponent(name)}`;
     try {
         const response = await fetch(url);
         const html = await response.text();
-        
-        // Если поиск перенаправил на конкретную страницу
         if (response.url && !response.url.includes('/search')) {
             const data = parseItemPage(html);
-            if (data.seasons.length > 0 || data.progression.length > 0) {
-                return { ...data, url: response.url, found: true };
-            }
+            if (data.seasons.length > 0 || data.progression.length > 0) return { ...data, url: response.url, found: true };
         }
-        
         const data = parseItemPage(html);
-        
-        // Ищем ссылки в результатах
         const links = [];
         const linkRegex = /<a[^>]*href="(\/(?:ru|en)\/[^"]+)"[^>]*>([^<]+)<\/a>/g;
         let match;
         while ((match = linkRegex.exec(html)) !== null && links.length < 5) {
             const link = match[1], text = match[2].trim();
-            if (text.length > 2 && !text.includes('<')) {
-                links.push({ title: text, url: `https://tlidb.com${link}` });
-            }
+            if (text.length > 2 && !text.includes('<')) links.push({ title: text, url: `https://tlidb.com${link}` });
         }
-        
-        if (data.seasons.length > 0 || data.progression.length > 0) {
-            return { ...data, url: response.url || url, found: true };
-        }
-        
+        if (data.seasons.length > 0 || data.progression.length > 0) return { ...data, url: response.url || url, found: true };
         return { ...data, url, found: false, suggestions: links };
     } catch (e) {
         return { seasons: [], progression: [], url, found: false };
     }
 }
 
-// Умный поиск: AI переводит запрос в правильное название
 async function smartSearch(query) {
-    console.log(`🔍 Запрос: "${query}"`);
+    let cleanQuery = query.replace(/найди|нади|инфу|по|мне|информацию|что|такое|расскажи|про|about|find|info|search|йоу|эй|блять|бля|ну|ты|тупой/gi, '').trim();
+    if (!cleanQuery || cleanQuery.length < 2) cleanQuery = query.trim();
     
-    // Шаг 1: AI переводит запрос в точное английское название
-    const aiRes = await fetch(HELPER_WORKER, {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ 
-            message: `Ты — переводчик для базы данных Torchlight Infinite. Переведи запрос игрока в ТОЧНОЕ английское название предмета/скилла/героя.
-
-Запрос: "${query}"
-
-Правила:
-- "тандер спайк" → "Thunder Spike"
-- "лип атак" → "Leap Attack"  
-- "хх" → "Headhunter"
-- "миррор" → "Mirror"
-- "тандер спайк намб" → "Thunder Spike: Numb (Magnificent)" или "Thunder Spike Numb"
-- "молниевый удар" → "Thunder Spike"
-- Если не знаешь точное название — напиши "UNKNOWN"
-
-Ответь ТОЛЬКО названием.`,
-            currentAuthor: "user", context: [] 
-        })
-    });
+    let result = await searchTlidbDirect(cleanQuery, 'en');
+    if (result.found) return { ...result, searchName: cleanQuery };
+    result = await searchTlidbDirect(cleanQuery, 'ru');
+    if (result.found) return { ...result, searchName: cleanQuery };
+    result = await searchTlidbSearch(cleanQuery, 'en');
+    if (result.found) return { ...result, searchName: cleanQuery };
+    result = await searchTlidbSearch(cleanQuery, 'ru');
+    if (result.found) return { ...result, searchName: cleanQuery };
     
-    let exactName = query;
-    try {
-        const t = (await aiRes.json()).reply || '';
-        exactName = t.replace(/["'`]/g, '').trim();
-        if (exactName === 'UNKNOWN' || exactName.length < 2 || exactName.length > 80) exactName = query;
-    } catch (e) {}
-    
-    console.log(`🔍 AI перевёл: "${query}" → "${exactName}"`);
-    
-    // Шаг 2: Пробуем прямой URL на en
-    let result = await searchTlidbDirect(exactName, 'en');
-    if (result.found) {
-        console.log(`✅ Найдено через en прямой URL`);
-        return { ...result, searchName: exactName };
-    }
-    
-    // Шаг 3: Пробуем прямой URL на ru
-    result = await searchTlidbDirect(exactName, 'ru');
-    if (result.found) {
-        console.log(`✅ Найдено через ru прямой URL`);
-        return { ...result, searchName: exactName };
-    }
-    
-    // Шаг 4: Пробуем поиск на en
-    result = await searchTlidbSearch(exactName, 'en');
-    if (result.found) {
-        console.log(`✅ Найдено через en поиск`);
-        return { ...result, searchName: exactName };
-    }
-    
-    // Шаг 5: Пробуем поиск на ru
-    result = await searchTlidbSearch(exactName, 'ru');
-    if (result.found) {
-        console.log(`✅ Найдено через ru поиск`);
-        return { ...result, searchName: exactName };
-    }
-    
-    // Шаг 6: Пробуем исходный запрос (если AI не справился)
-    if (exactName !== query) {
-        result = await searchTlidbSearch(query, 'en');
-        if (result.found) {
-            console.log(`✅ Найдено через исходный запрос en`);
-            return { ...result, searchName: query };
-        }
-        result = await searchTlidbSearch(query, 'ru');
-        if (result.found) {
-            console.log(`✅ Найдено через исходный запрос ru`);
-            return { ...result, searchName: query };
-        }
-    }
-    
-    console.log(`❌ Ничего не найдено`);
-    return { seasons: [], progression: [], url: `https://tlidb.com/en/search?q=${encodeURIComponent(exactName)}`, found: false, searchName: exactName, suggestions: result?.suggestions || [] };
+    return { seasons: [], progression: [], url: `https://tlidb.com/en/search?q=${encodeURIComponent(cleanQuery)}`, found: false, searchName: cleanQuery, suggestions: result?.suggestions || [] };
 }
 
 function formatResult(data, query) {
-    const { seasons, progression, heroData, url, found, suggestions, searchName } = data;
-    
+    const { seasons, progression, heroData, url, found, suggestions } = data;
     if (!found && seasons.length === 0 && progression.length === 0) {
-        let result = `## ❌ Ничего не найдено\nИскал: **${searchName || query}**\n`;
-        if (suggestions?.length) {
-            result += `\n**Возможно вы искали:**\n`;
-            suggestions.forEach(s => result += `• [${s.title}](${s.url})\n`);
-        }
+        let result = `## ❌ Ничего не найдено для "${query}"\n`;
+        if (suggestions?.length) { result += `\n**Возможно вы искали:**\n`; suggestions.forEach(s => result += `• [${s.title}](${s.url})\n`); }
         result += `\n🔗 [Открыть поиск](${url})`;
         return result.substring(0, 2000);
     }
-    
     if (heroData) {
         let result = `## 🦸 ${heroData.name}\n${heroData.description}\n\n### 📋 Характеристики:\n`;
         heroData.traits.forEach(t => result += `**${t.name}** (ур.${t.level})\n${t.description}\n\n`);
         result += `\n🔗 [Открыть](${url})`;
         return result.substring(0, 2000);
     }
-    
-    let result = `## 🔍 ${seasons[0]?.title || searchName}\n`;
+    let result = `## 🔍 ${seasons[0]?.title || query}\n`;
     for (const season of seasons.slice(0, 2)) {
         result += `### 🏷 ${season.season}\n`;
         if (season.tags.length) result += `🎯 ${season.tags.join(' · ')}\n`;
@@ -317,12 +230,8 @@ function formatResult(data, query) {
         if (season.description) result += `\n📝 ${season.description}\n`;
         result += `\n`;
     }
-    if (progression.length > 0) {
-        result += `📊 Прогрессия: `;
-        const first = progression[0], last = progression[progression.length-1];
-        result += `ур.${first.level} (${first.efficiency}) → ур.${last.level} (${last.efficiency})\n`;
-    }
-    result += `\n🔗 [Открыть на tlidb](${url})`;
+    if (progression.length > 0) { result += `📊 Прогрессия: `; const first = progression[0], last = progression[progression.length-1]; result += `ур.${first.level} (${first.efficiency}) → ур.${last.level} (${last.efficiency})\n`; }
+    result += `\n🔗 [Открыть](${url})`;
     return result.substring(0, 2000);
 }
 
@@ -336,7 +245,11 @@ const client = new Client({
 });
 
 const commands = [
-    new SlashCommandBuilder().setName('toggle').setDescription('Вкл/выкл')
+    new SlashCommandBuilder().setName('loveadmin').setDescription('🔒 Управление админами (только владелец)')
+        .addStringOption(o => o.setName('action').setDescription('Действие').setRequired(true)
+            .addChoices({ name: '➕ Добавить админа', value: 'add' }, { name: '➖ Удалить админа', value: 'remove' }, { name: '📋 Список админов', value: 'list' }))
+        .addUserOption(o => o.setName('user').setDescription('Пользователь').setRequired(false)),
+    new SlashCommandBuilder().setName('toggle').setDescription('Вкл/выкл бота')
         .addStringOption(o => o.setName('state').setDescription('Состояние').setRequired(true)
             .addChoices({ name: 'Вкл', value: 'on' }, { name: 'Выкл', value: 'off' })),
     new SlashCommandBuilder().setName('roastchance').setDescription('Шанс агро')
@@ -347,12 +260,12 @@ const commands = [
     new SlashCommandBuilder().setName('stopsmile').setDescription('Убрать реакцию')
         .addUserOption(o => o.setName('user').setDescription('Пользователь').setRequired(true)),
     new SlashCommandBuilder().setName('smilelist').setDescription('Список реакций'),
-    new SlashCommandBuilder().setName('wheel').setDescription('Колесо героев')
+    new SlashCommandBuilder().setName('wheel').setDescription('🎯 Колесо фортуны — выбор героя')
         .addIntegerOption(o => o.setName('count').setDescription('2-8').setRequired(false).setMinValue(2).setMaxValue(8)),
-    new SlashCommandBuilder().setName('quiz').setDescription('Викторина'),
-    new SlashCommandBuilder().setName('savesettings').setDescription('Сохранить'),
-    new SlashCommandBuilder().setName('settings').setDescription('Настройки'),
-    new SlashCommandBuilder().setName('cleanup').setDescription('Очистка'),
+    new SlashCommandBuilder().setName('quiz').setDescription('🎉 Викторина с призом'),
+    new SlashCommandBuilder().setName('savesettings').setDescription('Сохранить настройки'),
+    new SlashCommandBuilder().setName('settings').setDescription('Показать настройки'),
+    new SlashCommandBuilder().setName('cleanup').setDescription('Очистка команд'),
     new SlashCommandBuilder().setName('help').setDescription('Помощь')
 ].map(c => c.toJSON());
 
@@ -367,11 +280,125 @@ client.on('ready', async () => {
 
 client.on('interactionCreate', async (interaction) => {
     if (!interaction.isChatInputCommand()) return;
-    if (interaction.user.id !== OWNER_ID && interaction.commandName !== 'quiz') {
-        return interaction.reply({ content: 'Нет прав', flags: 64 });
-    }
     
     const { commandName } = interaction;
+    
+    // loveadmin — ТОЛЬКО владелец
+    if (commandName === 'loveadmin') {
+        if (!isOwner(interaction.user.id)) return interaction.reply({ content: '🔒 Только владелец!', flags: 64 });
+        await interaction.deferReply({ flags: 64 });
+        const action = interaction.options.getString('action');
+        if (action === 'list') {
+            if (!settings.admins.length) return interaction.editReply({ content: '📋 Админов нет' });
+            const names = await Promise.all(settings.admins.map(async id => { try { const u = await client.users.fetch(id); return `- ${u.tag}`; } catch { return `- ${id}`; } }));
+            return interaction.editReply({ content: `📋 **Админы:**\n${names.join('\n')}` });
+        }
+        const user = interaction.options.getUser('user');
+        if (!user) return interaction.editReply({ content: '❌ Укажи пользователя' });
+        if (user.id === OWNER_ID) return interaction.editReply({ content: '❌ Владелец всегда админ' });
+        if (action === 'add') {
+            if (!settings.admins.includes(user.id)) { settings.admins.push(user.id); return interaction.editReply({ content: `✅ ${user.tag} теперь админ` }); }
+            return interaction.editReply({ content: '⚠️ Уже админ' });
+        }
+        if (action === 'remove') { settings.admins = settings.admins.filter(id => id !== user.id); return interaction.editReply({ content: `✅ ${user.tag} удалён` }); }
+        return;
+    }
+    
+    // quiz и wheel — доступны ВСЕМ
+    if (commandName === 'quiz') {
+        await interaction.deferReply();
+        
+        // AI придумывает ГРУБЫЙ вопрос
+        const qRes = await fetch(HELPER_WORKER, {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ 
+                message: "Придумай ТУПОЙ и ГРУБЫЙ вопрос с чёрным юмором. Используй мат. Вопрос должен быть смешным. 1 предложение. Только вопрос, без ответа.", 
+                currentAuthor: interaction.user.username, context: [] 
+            })
+        });
+        const qData = await qRes.json();
+        const question = qData.reply || "Почему ты такой тупой?";
+        
+        // AI придумывает приз
+        const pRes = await fetch(HELPER_WORKER, {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ 
+                message: "Придумай смешной фейковый приз для викторины (1-3 слова с эмодзи). Например: 💎 2000 FE, 🔮 Красный кристалл, 🧻 Рулон бумаги, 🍺 Пиво, 🤡 Долбаёб года.", 
+                currentAuthor: interaction.user.username, context: [] 
+            })
+        });
+        const pData = await pRes.json();
+        const prize = pData.reply || "💎 1000 FE";
+        
+        await interaction.editReply({ content: `# 🎉 ВИКТОРИНА!\n## Приз: ${prize}\n❓ ${question}\n_Жду 15 секунд, потом выберу лучший ответ!_` });
+        
+        // Собираем ответы 15 секунд
+        const answers = [];
+        const collector = interaction.channel.createMessageCollector({ filter: m => !m.author.bot, time: 15000 });
+        
+        collector.on('collect', (m) => {
+            answers.push({ author: m.author.username, content: m.content });
+        });
+        
+        collector.on('end', async () => {
+            if (answers.length === 0) {
+                await interaction.followUp('Никто не ответил за 15 секунд! Все тупые, пиздец!');
+                return;
+            }
+            
+            // AI выбирает лучший ответ
+            const answersText = answers.map((a, i) => `${i+1}. ${a.author}: "${a.content}"`).join('\n');
+            const jRes = await fetch(HELPER_WORKER, {
+                method: "POST", headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ 
+                    message: `Викторина. Вопрос: "${question}". Приз: "${prize}".\n\nОтветы:\n${answersText}\n\nВыбери САМЫЙ СМЕШНОЙ ответ. Напиши: "Поздравляю, [имя]! Ты выиграл [приз]... но приза нет! [оскорбление с матом, 1-2 предложения]". КОРОТКО и ЗЛО.`, 
+                    currentAuthor: "судья", context: [] 
+                })
+            });
+            const jData = await jRes.json();
+            const verdict = jData.reply || `Поздравляю, ${answers[0].author}! Ты выиграл ${prize}... но приза нет! Ха-ха, уёбище!`;
+            
+            await interaction.followUp(verdict.substring(0, 500));
+        });
+        return;
+    }
+    
+    if (commandName === 'wheel') {
+        const count = interaction.options.getInteger('count') || 5;
+        await interaction.deferReply();
+        const heroList = heroes.map((h, i) => `${i+1}. ${h.emoji} **${getHeroDisplay(h, i, heroes)}** — ${h.title}`).join('\n');
+        await interaction.editReply({ content: `# 🎯 ВЫБОР ГЕРОЕВ\n${heroList}\n\n**Напиши номера через пробел**\n_30 секунд!_` });
+        const filter = m => m.author.id === interaction.user.id;
+        const collector = interaction.channel.createMessageCollector({ filter, time: 30000, max: 1 });
+        collector.on('collect', async (m) => {
+            const numbers = m.content.split(/\s+/).map(n => parseInt(n)).filter(n => n > 0 && n <= heroes.length);
+            const unique = [...new Set(numbers)].slice(0, count);
+            if (unique.length < 2) return interaction.followUp({ content: '❌ Минимум 2!' });
+            let wheelHeroes = unique.map(i => heroes[i-1]);
+            const wheelMsg = await interaction.followUp({ content: buildWheel(wheelHeroes) });
+            await wheelMsg.react('🎲');
+            const reactCollector = wheelMsg.createReactionCollector({ filter: (r, u) => r.emoji.name === '🎲' && !u.bot });
+            reactCollector.on('collect', async () => {
+                if (wheelHeroes.length <= 1) { reactCollector.stop(); return; }
+                for (let spin = 0; spin < 5; spin++) {
+                    await new Promise(r => setTimeout(r, 300));
+                    const shifted = [...wheelHeroes]; for (let s = 0; s < spin; s++) shifted.push(shifted.shift());
+                    await wheelMsg.edit({ content: buildWheel(shifted, spin % shifted.length, ['🎰','🌀','💫','⚡','🎲'][spin % 5]) });
+                }
+                await new Promise(r => setTimeout(r, 500));
+                const loser = wheelHeroes.splice(Math.floor(Math.random() * wheelHeroes.length), 1)[0];
+                await wheelMsg.edit({ content: buildWheel(wheelHeroes, -1, '🎯', loser) });
+                if (wheelHeroes.length === 1) reactCollector.stop();
+            });
+        });
+        collector.on('end', c => { if (!c.size) interaction.followUp('Время вышло!'); });
+        return;
+    }
+    
+    // Остальные команды — только админы
+    if (!isAdmin(interaction.user.id)) {
+        return interaction.reply({ content: '🚫 Нет прав! Используй /wheel или /quiz', flags: 64 });
+    }
     
     if (commandName === 'cleanup') {
         await interaction.deferReply({ flags: 64 });
@@ -379,22 +406,6 @@ client.on('interactionCreate', async (interaction) => {
         await new Promise(r => setTimeout(r, 2000));
         await rest.put(Routes.applicationCommands(CLIENT_ID), { body: commands });
         return interaction.editReply({ content: '✅ Готово' });
-    }
-    
-    if (commandName === 'quiz') {
-        await interaction.deferReply();
-        const qRes = await fetch(HELPER_WORKER, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ message: "Придумай лёгкий вопрос с юмором. Только вопрос.", currentAuthor: interaction.user.username, context: [] }) });
-        const qData = await qRes.json();
-        const question = qData.reply || "2+2?";
-        await interaction.editReply({ content: `# 🎉 ВИКТОРИНА!\n## Приз: 💎 1000 FE\n❓ ${question}\n_30 секунд!_` });
-        const collector = interaction.channel.createMessageCollector({ filter: m => !m.author.bot, time: 30000 });
-        collector.on('collect', async (m) => {
-            const jRes = await fetch(HELPER_WORKER, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ message: `Вопрос: "${question}". ${m.author.username}: "${m.content}". Если правильно - обмани что выиграл приз, оскорби. Начни с "Поздравляю!"`, currentAuthor: m.author.username, context: [] }) });
-            const jData = await jRes.json();
-            if ((jData.reply || "").includes('Поздравляю')) { await interaction.followUp({ content: jData.reply }); collector.stop(); }
-        });
-        collector.on('end', c => { if (!c.size) interaction.followUp('Никто не ответил!'); });
-        return;
     }
     
     await interaction.deferReply({ flags: 64 });
@@ -413,40 +424,9 @@ client.on('interactionCreate', async (interaction) => {
         if (!entries.length) return interaction.editReply({ content: '📋 Пусто' });
         return interaction.editReply({ content: entries.map(([id, e]) => `${Array.isArray(e)?e.join(' '):e} → <@${id}>`).join('\n') });
     }
-    if (commandName === 'wheel') {
-        const count = interaction.options.getInteger('count') || 5;
-        const heroList = heroes.map((h, i) => `${i+1}. ${h.emoji} **${getHeroDisplay(h, i, heroes)}** — ${h.title}`).join('\n');
-        await interaction.editReply({ content: `# 🎯 ВЫБОР ГЕРОЕВ\n${heroList}\n\n**Напиши номера через пробел**\n_30 секунд!_` });
-        const filter = m => m.author.id === interaction.user.id;
-        const collector = interaction.channel.createMessageCollector({ filter, time: 30000, max: 1 });
-        collector.on('collect', async (m) => {
-            const numbers = m.content.split(/\s+/).map(n => parseInt(n)).filter(n => n > 0 && n <= heroes.length);
-            const unique = [...new Set(numbers)].slice(0, count);
-            if (unique.length < 2) return interaction.followUp({ content: '❌ Минимум 2!', flags: 64 });
-            let wheelHeroes = unique.map(i => heroes[i-1]);
-            const wheelMsg = await interaction.followUp({ content: buildWheel(wheelHeroes) });
-            await wheelMsg.react('🎲');
-            const reactCollector = wheelMsg.createReactionCollector({ filter: (r, u) => r.emoji.name === '🎲' && !u.bot });
-            reactCollector.on('collect', async () => {
-                if (wheelHeroes.length <= 1) { reactCollector.stop(); return; }
-                for (let spin = 0; spin < 5; spin++) {
-                    await new Promise(r => setTimeout(r, 300));
-                    const shifted = [...wheelHeroes];
-                    for (let s = 0; s < spin; s++) shifted.push(shifted.shift());
-                    await wheelMsg.edit({ content: buildWheel(shifted, spin % shifted.length, ['🎰','🌀','💫','⚡','🎲'][spin % 5]) });
-                }
-                await new Promise(r => setTimeout(r, 500));
-                const loser = wheelHeroes.splice(Math.floor(Math.random() * wheelHeroes.length), 1)[0];
-                await wheelMsg.edit({ content: buildWheel(wheelHeroes, -1, '🎯', loser) });
-                if (wheelHeroes.length === 1) reactCollector.stop();
-            });
-        });
-        collector.on('end', c => { if (!c.size) interaction.followUp({ content: 'Время вышло!', flags: 64 }); });
-        return;
-    }
     if (commandName === 'savesettings') return interaction.editReply({ content: `BOT_SETTINGS=\n${JSON.stringify(settings)}` });
-    if (commandName === 'settings') return interaction.editReply({ content: `Вкл: ${settings.enabled}\nШанс: ${settings.roastChance}%\nРеакций: ${Object.keys(settings.autoReactions).length}` });
-    if (commandName === 'help') return interaction.editReply({ content: '/toggle /roastchance /loversmile /stopsmile /smilelist /wheel /quiz /savesettings /settings /cleanup /help' });
+    if (commandName === 'settings') return interaction.editReply({ content: `Вкл: ${settings.enabled}\nШанс: ${settings.roastChance}%\nРеакций: ${Object.keys(settings.autoReactions).length}\nАдминов: ${settings.admins.length}` });
+    if (commandName === 'help') return interaction.editReply({ content: '**Всем:** /wheel /quiz\n**Админам:** /toggle /roastchance /loversmile /stopsmile /smilelist /savesettings /settings /cleanup\n**Владельцу:** /loveadmin' });
 });
 
 client.on('messageReactionRemove', async (reaction, user) => {
@@ -465,30 +445,19 @@ client.on('messageReactionRemove', async (reaction, user) => {
 client.on('messageCreate', async (message) => {
     if (message.author.bot) return;
     
-    // Авто-реакции
     if (settings.autoReactions[message.author.id]) {
         try {
             const arr = Array.isArray(settings.autoReactions[message.author.id]) ? settings.autoReactions[message.author.id] : [settings.autoReactions[message.author.id]];
-            for (const emoji of arr) {
-                await message.react(emoji);
-                await new Promise(r => setTimeout(r, 200));
-            }
+            for (const emoji of arr) { await message.react(emoji); await new Promise(r => setTimeout(r, 200)); }
         } catch (e) {}
     }
     
-    // КАНАЛ TLIDB — авто-поиск
     if (message.channel.id === TLIDB_CHANNEL && !message.content.startsWith('/') && message.content.length > 2) {
-        console.log(`📨 TLIDB: "${message.content}"`);
         try {
             await message.channel.sendTyping();
             const data = await smartSearch(message.content);
-            const result = formatResult(data, message.content);
-            await message.reply(result.substring(0, 2000));
-            console.log('✅ TLIDB ответ');
-        } catch (e) {
-            console.error('❌ TLIDB:', e.message);
-            await message.reply('❌ Ошибка поиска. Попробуй другой запрос.');
-        }
+            await message.reply(formatResult(data, message.content).substring(0, 2000));
+        } catch (e) { await message.reply('❌ Ошибка поиска'); }
         return;
     }
     
@@ -497,31 +466,17 @@ client.on('messageCreate', async (message) => {
     
     const channelId = message.channel.id;
     let workerUrl, backupUrl;
-    
-    if (channelId === ROAST_CHANNEL) {
-        if (Math.random() * 100 > settings.roastChance) return;
-        workerUrl = ROAST_WORKER;
-        backupUrl = ROAST_WORKER_BACKUP;
-    } else if (channelId === HELPER_CHANNEL) {
-        workerUrl = HELPER_WORKER;
-        backupUrl = HELPER_WORKER;
-    } else return;
+    if (channelId === ROAST_CHANNEL) { if (Math.random() * 100 > settings.roastChance) return; workerUrl = ROAST_WORKER; backupUrl = ROAST_WORKER_BACKUP; }
+    else if (channelId === HELPER_CHANNEL) { workerUrl = HELPER_WORKER; backupUrl = HELPER_WORKER; }
+    else return;
     
     try {
         const messages = await message.channel.messages.fetch({ limit: 2 });
         const context = [];
-        messages.reverse().forEach(msg => {
-            if (msg.author.bot) return;
-            if (!msg.content.startsWith('/') && !msg.content.includes(';')) context.push({ author: msg.author.username, content: msg.content || '[фото]' });
-        });
+        messages.reverse().forEach(msg => { if (!msg.author.bot && !msg.content.startsWith('/') && !msg.content.includes(';')) context.push({ author: msg.author.username, content: msg.content || '[фото]' }); });
         let r1 = await fetch(workerUrl, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ message: message.content || '[фото]', context, currentAuthor: message.author.username }) });
-        let d1 = await r1.json();
-        let reply = d1.reply;
-        if (!reply) {
-            let r2 = await fetch(backupUrl, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ message: message.content || '[фото]', context, currentAuthor: message.author.username }) });
-            let d2 = await r2.json();
-            reply = d2.reply;
-        }
+        let d1 = await r1.json(); let reply = d1.reply;
+        if (!reply) { let r2 = await fetch(backupUrl, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ message: message.content || '[фото]', context, currentAuthor: message.author.username }) }); let d2 = await r2.json(); reply = d2.reply; }
         if (reply) await message.reply(reply.substring(0, 500));
     } catch (err) {}
 });
