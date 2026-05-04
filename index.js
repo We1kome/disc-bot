@@ -20,42 +20,39 @@ if (process.env.BOT_SETTINGS) {
     try {
         settings = JSON.parse(process.env.BOT_SETTINGS);
         if (!settings.autoReactions) settings.autoReactions = {};
-        console.log('📂 Настройки загружены из переменной');
-    } catch (e) {
-        console.log('⚠️ Ошибка парсинга BOT_SETTINGS');
-    }
+    } catch (e) {}
 }
 
-console.log('⚙️ Настройки:', JSON.stringify(settings));
+// Храним сообщения где бот уже ставил реакции
+const reactedMessages = new Set();
 
-// Список героев Torchlight Infinite
 const heroes = [
-    { name: "Rehan", title: "Berserker | Anger", emoji: "🪓", color: "red" },
-    { name: "Rehan", title: "Seething Silhouette", emoji: "👻", color: "red" },
-    { name: "Carino", title: "Ranger of Glory", emoji: "🏹", color: "gold" },
-    { name: "Carino", title: "Lethal Flash", emoji: "💥", color: "gold" },
-    { name: "Carino", title: "Zealot of War", emoji: "⚔️", color: "gold" },
-    { name: "Erika", title: "Wind Stalker", emoji: "🌪️", color: "green" },
-    { name: "Erika", title: "Lightning Shadow", emoji: "⚡", color: "green" },
-    { name: "Erika", title: "Vendetta's Sting", emoji: "🗡️", color: "green" },
-    { name: "Bing", title: "Blast Nova", emoji: "💣", color: "orange" },
-    { name: "Bing", title: "Creative Genius", emoji: "🧠", color: "orange" },
-    { name: "Gemma", title: "Flame of Pleasure", emoji: "🔥", color: "blue" },
-    { name: "Gemma", title: "Frostbitten Heart", emoji: "❄️", color: "blue" },
-    { name: "Gemma", title: "Ice-Fire Fusion", emoji: "🌊", color: "blue" },
-    { name: "Thea", title: "Wisdom of The Gods", emoji: "🦉", color: "purple" },
-    { name: "Thea", title: "Incarnation of The Gods", emoji: "👼", color: "purple" },
-    { name: "Thea", title: "Blasphemer", emoji: "😈", color: "purple" },
-    { name: "Youga", title: "Spacetime Illusion", emoji: "🌀", color: "cyan" },
-    { name: "Youga", title: "Spacetime Elapse", emoji: "⏳", color: "cyan" },
-    { name: "Moto", title: "Order Calling", emoji: "🤖", color: "gray" },
-    { name: "Moto", title: "Charge Calling", emoji: "💣", color: "gray" },
-    { name: "Rosa", title: "High Court Chariot", emoji: "🛡️", color: "white" },
-    { name: "Rosa", title: "Unsullied Blade", emoji: "🗡️", color: "white" },
-    { name: "Iris", title: "Growing Breeze", emoji: "🌿", color: "lime" },
-    { name: "Iris", title: "Vigilant Breeze", emoji: "💨", color: "lime" },
-    { name: "Selena", title: "Sing with the Tide", emoji: "🌊", color: "aqua" },
-    { name: "Sage", title: "Scent Weaver | Licorice Note", emoji: "🎵", color: "pink" }
+    { name: "Rehan", title: "Berserker | Anger", emoji: "🪓" },
+    { name: "Rehan", title: "Seething Silhouette", emoji: "👻" },
+    { name: "Carino", title: "Ranger of Glory", emoji: "🏹" },
+    { name: "Carino", title: "Lethal Flash", emoji: "💥" },
+    { name: "Carino", title: "Zealot of War", emoji: "⚔️" },
+    { name: "Erika", title: "Wind Stalker", emoji: "🌪️" },
+    { name: "Erika", title: "Lightning Shadow", emoji: "⚡" },
+    { name: "Erika", title: "Vendetta's Sting", emoji: "🗡️" },
+    { name: "Bing", title: "Blast Nova", emoji: "💣" },
+    { name: "Bing", title: "Creative Genius", emoji: "🧠" },
+    { name: "Gemma", title: "Flame of Pleasure", emoji: "🔥" },
+    { name: "Gemma", title: "Frostbitten Heart", emoji: "❄️" },
+    { name: "Gemma", title: "Ice-Fire Fusion", emoji: "🌊" },
+    { name: "Thea", title: "Wisdom of The Gods", emoji: "🦉" },
+    { name: "Thea", title: "Incarnation of The Gods", emoji: "👼" },
+    { name: "Thea", title: "Blasphemer", emoji: "😈" },
+    { name: "Youga", title: "Spacetime Illusion", emoji: "🌀" },
+    { name: "Youga", title: "Spacetime Elapse", emoji: "⏳" },
+    { name: "Moto", title: "Order Calling", emoji: "🤖" },
+    { name: "Moto", title: "Charge Calling", emoji: "💥" },
+    { name: "Rosa", title: "High Court Chariot", emoji: "🛡️" },
+    { name: "Rosa", title: "Unsullied Blade", emoji: "⚔️" },
+    { name: "Iris", title: "Growing Breeze", emoji: "🌿" },
+    { name: "Iris", title: "Vigilant Breeze", emoji: "💨" },
+    { name: "Selena", title: "Sing with the Tide", emoji: "🌊" },
+    { name: "Sage", title: "Scent Weaver | Licorice Note", emoji: "🎵" }
 ];
 
 const client = new Client({
@@ -68,265 +65,164 @@ const client = new Client({
 });
 
 const commands = [
-    new SlashCommandBuilder()
-        .setName('toggle')
-        .setDescription('Включить или выключить бота')
-        .addStringOption(o => o
-            .setName('state')
-            .setDescription('Состояние')
-            .setRequired(true)
-            .addChoices(
-                { name: 'Включить', value: 'on' }, 
-                { name: 'Выключить', value: 'off' }
-            )),
-    new SlashCommandBuilder()
-        .setName('roastchance')
-        .setDescription('Шанс агрессивного ответа')
-        .addIntegerOption(o => o
-            .setName('percent')
-            .setDescription('Процент от 0 до 100')
-            .setRequired(true)
-            .setMinValue(0)
-            .setMaxValue(100)),
-    new SlashCommandBuilder()
-        .setName('loversmile')
-        .setDescription('Поставить авто-реакции на пользователя')
-        .addStringOption(o => o
-            .setName('emoji')
-            .setDescription('Эмодзи через пробел')
-            .setRequired(true))
-        .addUserOption(o => o
-            .setName('user')
-            .setDescription('Пользователь')
-            .setRequired(true)),
-    new SlashCommandBuilder()
-        .setName('stopsmile')
-        .setDescription('Убрать авто-реакцию с пользователя')
-        .addUserOption(o => o
-            .setName('user')
-            .setDescription('Пользователь')
-            .setRequired(true)),
-    new SlashCommandBuilder()
-        .setName('smilelist')
-        .setDescription('Показать список авто-реакций'),
-    new SlashCommandBuilder()
-        .setName('wheel')
-        .setDescription('Колесо фортуны — выбор героя Torchlight!')
-        .addIntegerOption(o => o
-            .setName('count')
-            .setDescription('Сколько героев в колесе (3-8)')
-            .setRequired(false)
-            .setMinValue(3)
-            .setMaxValue(8)),
-    new SlashCommandBuilder()
-        .setName('quiz')
-        .setDescription('Оскорбительная викторина'),
-    new SlashCommandBuilder()
-        .setName('savesettings')
-        .setDescription('Вывести настройки для сохранения в Railway'),
-    new SlashCommandBuilder()
-        .setName('settings')
-        .setDescription('Показать текущие настройки'),
-    new SlashCommandBuilder()
-        .setName('cleanup')
-        .setDescription('Очистить и перерегистрировать команды'),
-    new SlashCommandBuilder()
-        .setName('help')
-        .setDescription('Список всех команд')
+    new SlashCommandBuilder().setName('toggle').setDescription('Вкл/выкл')
+        .addStringOption(o => o.setName('state').setDescription('Состояние').setRequired(true)
+            .addChoices({ name: 'Вкл', value: 'on' }, { name: 'Выкл', value: 'off' })),
+    new SlashCommandBuilder().setName('roastchance').setDescription('Шанс агро')
+        .addIntegerOption(o => o.setName('percent').setDescription('0-100%').setRequired(true).setMinValue(0).setMaxValue(100)),
+    new SlashCommandBuilder().setName('loversmile').setDescription('Авто-реакция')
+        .addStringOption(o => o.setName('emoji').setDescription('Эмодзи').setRequired(true))
+        .addUserOption(o => o.setName('user').setDescription('Пользователь').setRequired(true)),
+    new SlashCommandBuilder().setName('stopsmile').setDescription('Убрать реакцию')
+        .addUserOption(o => o.setName('user').setDescription('Пользователь').setRequired(true)),
+    new SlashCommandBuilder().setName('smilelist').setDescription('Список реакций'),
+    new SlashCommandBuilder().setName('wheel').setDescription('Колесо героев')
+        .addIntegerOption(o => o.setName('count').setDescription('2-8').setRequired(false).setMinValue(2).setMaxValue(8)),
+    new SlashCommandBuilder().setName('quiz').setDescription('Викторина'),
+    new SlashCommandBuilder().setName('savesettings').setDescription('Сохранить'),
+    new SlashCommandBuilder().setName('settings').setDescription('Настройки'),
+    new SlashCommandBuilder().setName('cleanup').setDescription('Очистка'),
+    new SlashCommandBuilder().setName('help').setDescription('Помощь')
 ].map(c => c.toJSON());
 
 const rest = new REST({ version: '10' }).setToken(TOKEN);
 
 client.on('ready', async () => {
-    console.log('✅ Бот запущен:', client.user.tag);
-    try {
-        await rest.put(Routes.applicationCommands(CLIENT_ID), { body: commands });
-        console.log('✅ Команды зарегистрированы');
-    } catch (e) {
-        console.error('❌ Ошибка регистрации команд:', e.message);
-    }
+    console.log('✅ Бот:', client.user.tag);
+    await rest.put(Routes.applicationCommands(CLIENT_ID), { body: commands });
 });
 
 client.on('interactionCreate', async (interaction) => {
     if (!interaction.isChatInputCommand()) return;
-    if (interaction.user.id !== OWNER_ID) {
-        return interaction.reply({ content: '🚫 Нет прав', flags: 64 });
-    }
+    if (interaction.user.id !== OWNER_ID) return interaction.reply({ content: 'Нет прав', flags: 64 });
     
     const { commandName } = interaction;
     
     if (commandName === 'cleanup') {
         await interaction.deferReply({ flags: 64 });
-        try {
-            await rest.put(Routes.applicationCommands(CLIENT_ID), { body: [] });
-            await new Promise(r => setTimeout(r, 2000));
-            await rest.put(Routes.applicationCommands(CLIENT_ID), { body: commands });
-            return interaction.editReply({ content: '✅ Команды очищены!' });
-        } catch (e) {
-            return interaction.editReply({ content: '❌ Ошибка: ' + e.message });
-        }
+        await rest.put(Routes.applicationCommands(CLIENT_ID), { body: [] });
+        await new Promise(r => setTimeout(r, 2000));
+        await rest.put(Routes.applicationCommands(CLIENT_ID), { body: commands });
+        return interaction.editReply({ content: '✅ Готово' });
     }
     
     await interaction.deferReply({ flags: 64 });
     
     if (commandName === 'toggle') {
         settings.enabled = interaction.options.getString('state') === 'on';
-        return interaction.editReply({ content: settings.enabled ? '✅ Бот включен' : '❌ Бот выключен' });
+        return interaction.editReply({ content: settings.enabled ? '✅ Вкл' : '❌ Выкл' });
     }
-    
     if (commandName === 'roastchance') {
         settings.roastChance = interaction.options.getInteger('percent');
-        return interaction.editReply({ content: `✅ Шанс агро: ${settings.roastChance}%` });
+        return interaction.editReply({ content: `✅ ${settings.roastChance}%` });
     }
-    
     if (commandName === 'loversmile') {
-        const emojiString = interaction.options.getString('emoji');
+        const emojis = interaction.options.getString('emoji').split(/\s+/).filter(e => e.trim());
         const user = interaction.options.getUser('user');
-        const emojis = emojiString.split(/\s+/).filter(e => e.trim() !== '');
-        if (emojis.length === 0) return interaction.editReply({ content: '❌ Укажи хотя бы один эмодзи!' });
+        if (!emojis.length) return interaction.editReply({ content: '❌ Нет эмодзи' });
         settings.autoReactions[user.id] = emojis;
-        return interaction.editReply({ content: `✅ Реакции ${emojis.join(' ')} на ${user.tag}` });
+        return interaction.editReply({ content: `✅ ${emojis.join(' ')} → ${user.tag}` });
     }
-    
     if (commandName === 'stopsmile') {
         const user = interaction.options.getUser('user');
         delete settings.autoReactions[user.id];
-        return interaction.editReply({ content: `✅ Реакции для ${user.tag} убраны` });
+        return interaction.editReply({ content: `✅ Убрано` });
     }
-    
     if (commandName === 'smilelist') {
         const entries = Object.entries(settings.autoReactions);
-        if (entries.length === 0) return interaction.editReply({ content: '📋 Пусто' });
-        let list = '';
-        for (const [userId, emojis] of entries) {
-            try {
-                const u = await client.users.fetch(userId);
-                list += `- ${u.tag}: ${Array.isArray(emojis) ? emojis.join(' ') : emojis}\n`;
-            } catch { list += `- ${userId}: ${emojis}\n`; }
-        }
-        return interaction.editReply({ content: `📋 **Реакции:**\n${list}` });
+        if (!entries.length) return interaction.editReply({ content: '📋 Пусто' });
+        let list = entries.map(([id, e]) => `${Array.isArray(e)?e.join(' '):e} → <@${id}>`).join('\n');
+        return interaction.editReply({ content: list });
     }
-    
-    if (commandName === 'quiz') {
-        await interaction.editReply({ content: '🤓 Нейронка придумывает вопрос...' });
-        
-        const quizResponse = await fetch(HELPER_WORKER, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-                message: "Придумай короткий вопрос с подвохом. Только вопрос, без ответа.",
-                currentAuthor: interaction.user.username,
-                context: []
-            })
-        });
-        const quizData = await quizResponse.json();
-        const question = quizData.reply || "Сколько будет 2+2?";
-        
-        await interaction.editReply({ content: `🤓 **ВОПРОС:** ${question}\n_20 секунд на ответ!_` });
-        
-        const filter = m => m.author.id === interaction.user.id;
-        const collector = interaction.channel.createMessageCollector({ filter, time: 20000, max: 1 });
-        
-        collector.on('collect', async (m) => {
-            const judgeResponse = await fetch(HELPER_WORKER, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    message: `Вопрос: "${question}"\nОтвет: "${m.content}"\n\nОцени. Если правильно - похвали с матом. Если нет - жёстко оскорби. 2-3 предложения.`,
-                    currentAuthor: interaction.user.username,
-                    context: []
-                })
-            });
-            const judgeData = await judgeResponse.json();
-            await interaction.followUp({ content: judgeData.reply || "Не могу оценить!", reply: { messageReference: m.id } });
-        });
-        
-        collector.on('end', collected => {
-            if (collected.size === 0) interaction.followUp({ content: "Время вышло, тупица!" });
-        });
-        return;
-    }
-    
     if (commandName === 'wheel') {
         const count = interaction.options.getInteger('count') || 5;
-        const shuffled = [...heroes].sort(() => Math.random() - 0.5);
-        const selected = shuffled.slice(0, count);
-        const spinFrames = ['🎰', '🌀', '💫', '⚡', '🎲', '🔮'];
-        
-        const spinMsg = await interaction.editReply({ 
-            content: `# 🎯 КОЛЕСО ФОРТУНЫ\n${spinFrames[0]} **Крутим...**\n` + 
-                selected.map((h, i) => `${['🥇','🥈','🥉','4️⃣','5️⃣','6️⃣','7️⃣','8️⃣'][i]} ${h.emoji} ${h.name}`).join('\n')
+        const shuffled = heroes.sort(() => Math.random() - 0.5).slice(0, count);
+        const winner = shuffled[Math.floor(Math.random() * shuffled.length)];
+        return interaction.editReply({ 
+            content: `# 🎯 КОЛЕСО\n${shuffled.map((h,i) => `${h.emoji} ${h.name}`).join(' | ')}\n## 🏆 Выпал: ${winner.emoji} **${winner.name}** — ${winner.title}!` 
         });
-        
-        for (let i = 0; i < 10; i++) {
-            await new Promise(r => setTimeout(r, 400));
-            const frame = spinFrames[i % spinFrames.length];
-            const highlighted = selected.map((h, idx) => 
-                idx === i % selected.length ? `**➡️ ${h.emoji} ${h.name}** ⬅️` : `${h.emoji} ${h.name}`
-            ).join('\n');
-            await spinMsg.edit({ content: `# 🎯 КОЛЕСО ФОРТУНЫ\n${frame} **Крутится...**\n${highlighted}` });
-        }
-        
-        const winner = selected[Math.floor(Math.random() * selected.length)];
-        const ansiColors = {
-            red: '\u001b[31m', gold: '\u001b[33m', green: '\u001b[32m',
-            blue: '\u001b[34m', purple: '\u001b[35m', orange: '\u001b[38;5;214m',
-            cyan: '\u001b[36m', gray: '\u001b[37m', white: '\u001b[37;1m',
-            lime: '\u001b[92m', aqua: '\u001b[96m', pink: '\u001b[95m'
-        };
-        
-        await spinMsg.edit({
-            content: `# 🎯 КОЛЕСО ФОРТУНЫ\n## 🏆 Выпал: ${winner.emoji} **${winner.name}** — ${winner.title}!\n` +
-                `\`\`\`ansi\n${ansiColors[winner.color] || ''}█▀█ █▀█ █▀▄ █▀█ █░█ █░░ █▄█ █▀▀ █▀▄▀█\n` +
-                `█▀▀ █▀█ █▄▀ █▀█ █▄█ █▄▄ ░█░ ██▄ █░▀░█\n\u001b[0m\n` +
-                `Герой: ${winner.emoji} **${winner.name}** — *${winner.title}*\`\`\``
+    }
+    if (commandName === 'quiz') {
+        const qRes = await fetch(HELPER_WORKER, {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ message: "Придумай лёгкий вопрос с юмором. Только вопрос.", currentAuthor: interaction.user.username, context: [] })
         });
+        const qData = await qRes.json();
+        const question = qData.reply || "2+2?";
+        
+        const prizes = ["💎 1000 FE", "🔮 Красный кристалл", "🔥 Легендарка", "👑 Титул"];
+        const prize = prizes[Math.floor(Math.random() * prizes.length)];
+        
+        await interaction.editReply({ content: `# 🎉 ВИКТОРИНА!\n## Приз: ${prize}\n❓ ${question}\n_30 секунд!_` });
+        
+        const collector = interaction.channel.createMessageCollector({ filter: m => !m.author.bot, time: 30000 });
+        
+        collector.on('collect', async (m) => {
+            const jRes = await fetch(HELPER_WORKER, {
+                method: "POST", headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ message: `Вопрос: "${question}". ${m.author.username} ответил: "${m.content}". Если правильно - обмани что выиграл приз, потом скажи что приза нет и оскорби. Начни с "Поздравляю, ${m.author.username}!" 2 предложения с матом.`, currentAuthor: m.author.username, context: [] })
+            });
+            const jData = await jRes.json();
+            const verdict = jData.reply || "Поздравляю, ты выиграл НИЧЕГО!";
+            if (verdict.includes('Поздравляю') || verdict.includes('выиграл')) {
+                await m.reply(verdict);
+                collector.stop();
+            }
+        });
+        collector.on('end', collected => { if (!collected.size) interaction.followUp('Никто не ответил!'); });
         return;
     }
-    
     if (commandName === 'savesettings') {
-        return interaction.editReply({ 
-            content: `📋 Скопируй в Railway → Variables:\n**BOT_SETTINGS**\n\`\`\`json\n${JSON.stringify(settings)}\n\`\`\`` 
-        });
+        return interaction.editReply({ content: `BOT_SETTINGS=\n${JSON.stringify(settings)}` });
     }
-    
     if (commandName === 'settings') {
-        return interaction.editReply({ 
-            content: `⚙️ Вкл: ${settings.enabled}\nШанс: ${settings.roastChance}%\nРеакций: ${Object.keys(settings.autoReactions).length}` 
-        });
+        return interaction.editReply({ content: `Вкл: ${settings.enabled}\nШанс: ${settings.roastChance}%\nРеакций: ${Object.keys(settings.autoReactions).length}` });
     }
-    
     if (commandName === 'help') {
-        return interaction.editReply({ 
-            content: `**📋 Команды:**\n/toggle /roastchance /loversmile /stopsmile /smilelist /wheel /quiz /savesettings /settings /cleanup /help` 
-        });
+        return interaction.editReply({ content: '/toggle /roastchance /loversmile /stopsmile /smilelist /wheel /quiz /savesettings /settings /cleanup /help' });
     }
 });
 
-async function tryWorkers(workerUrl, backupUrl, body) {
-    let r = await fetch(workerUrl, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-    let d = await r.json();
-    if (d.reply) return d.reply;
-    r = await fetch(backupUrl, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-    d = await r.json();
-    return d.reply || null;
-}
+// При удалении реакции — переставляем
+client.on('messageReactionRemove', async (reaction, user) => {
+    if (user.bot) return;
+    const msg = reaction.message;
+    if (msg.author && settings.autoReactions[msg.author.id]) {
+        try {
+            const emojis = settings.autoReactions[msg.author.id];
+            if (Array.isArray(emojis)) {
+                for (const emoji of emojis) {
+                    if (!msg.reactions.cache.has(emoji.replace(/<a?:.*?:\d+>/g, ''))) {
+                        await msg.react(emoji);
+                    }
+                }
+            }
+        } catch (e) {}
+    }
+});
 
+// При получении сообщения
 client.on('messageCreate', async (message) => {
     if (message.author.bot) return;
     
+    // Ставим реакции
     if (settings.autoReactions[message.author.id]) {
-        try {
-            const emojis = settings.autoReactions[message.author.id];
-            if (Array.isArray(emojis)) {
-                for (const emoji of emojis) {
-                    await message.react(emoji);
-                    await new Promise(r => setTimeout(r, 200));
+        const msgId = message.id;
+        if (!reactedMessages.has(msgId)) {
+            reactedMessages.add(msgId);
+            try {
+                const emojis = settings.autoReactions[message.author.id];
+                if (Array.isArray(emojis)) {
+                    for (const emoji of emojis) {
+                        await message.react(emoji);
+                        await new Promise(r => setTimeout(r, 300));
+                    }
+                } else {
+                    await message.react(emojis);
                 }
-            } else {
-                await message.react(emojis);
-            }
-        } catch (e) {}
+            } catch (e) {}
+            if (reactedMessages.size > 100) reactedMessages.clear();
+        }
     }
     
     if (!settings.enabled) return;
@@ -354,15 +250,24 @@ client.on('messageCreate', async (message) => {
             }
         });
         
-        const reply = await tryWorkers(workerUrl, backupUrl, {
-            message: message.content || '[фото]',
-            context, currentAuthor: message.author.username
+        let r1 = await fetch(workerUrl, {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ message: message.content || '[фото]', context, currentAuthor: message.author.username })
         });
+        let d1 = await r1.json();
+        let reply = d1.reply;
+        
+        if (!reply) {
+            let r2 = await fetch(backupUrl, {
+                method: "POST", headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ message: message.content || '[фото]', context, currentAuthor: message.author.username })
+            });
+            let d2 = await r2.json();
+            reply = d2.reply;
+        }
         
         if (reply) await message.reply(reply.substring(0, 500));
-    } catch (err) {
-        console.error('❌', err.message);
-    }
+    } catch (err) {}
 });
 
 client.login(TOKEN);
