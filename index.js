@@ -134,44 +134,139 @@ client.on('interactionCreate', async (interaction) => {
         let list = entries.map(([id, e]) => `${Array.isArray(e)?e.join(' '):e} → <@${id}>`).join('\n');
         return interaction.editReply({ content: list });
     }
-    if (commandName === 'wheel') {
-        const count = interaction.options.getInteger('count') || 5;
-        const shuffled = heroes.sort(() => Math.random() - 0.5).slice(0, count);
-        const winner = shuffled[Math.floor(Math.random() * shuffled.length)];
-        return interaction.editReply({ 
-            content: `# 🎯 КОЛЕСО\n${shuffled.map((h,i) => `${h.emoji} ${h.name}`).join(' | ')}\n## 🏆 Выпал: ${winner.emoji} **${winner.name}** — ${winner.title}!` 
-        });
-    }
     if (commandName === 'quiz') {
-        const qRes = await fetch(HELPER_WORKER, {
+    await interaction.deferReply(); // Без ephemeral!
+    
+    const qRes = await fetch(HELPER_WORKER, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message: "Придумай лёгкий вопрос с юмором. Только вопрос.", currentAuthor: interaction.user.username, context: [] })
+    });
+    const qData = await qRes.json();
+    const question = qData.reply || "2+2?";
+    
+    const prizes = ["💎 1000 FE", "🔮 Красный кристалл", "🔥 Легендарка", "👑 Титул"];
+    const prize = prizes[Math.floor(Math.random() * prizes.length)];
+    
+    // Сообщение видно ВСЕМ
+    const quizMsg = await interaction.editReply({ content: `# 🎉 ВИКТОРИНА!\n## Приз: ${prize}\n❓ ${question}\n_30 секунд, отвечайте в чат!_` });
+    
+    const filter = m => !m.author.bot;
+    const collector = interaction.channel.createMessageCollector({ filter, time: 30000 });
+    
+    collector.on('collect', async (m) => {
+        const jRes = await fetch(HELPER_WORKER, {
             method: "POST", headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ message: "Придумай лёгкий вопрос с юмором. Только вопрос.", currentAuthor: interaction.user.username, context: [] })
+            body: JSON.stringify({ 
+                message: `Вопрос: "${question}". ${m.author.username} ответил: "${m.content}". Оцени ОДНИМ словом: "правильно" или "неправильно".`, 
+                currentAuthor: m.author.username, context: [] 
+            })
         });
-        const qData = await qRes.json();
-        const question = qData.reply || "2+2?";
+        const jData = await jRes.json();
+        const verdict = (jData.reply || "").toLowerCase();
         
-        const prizes = ["💎 1000 FE", "🔮 Красный кристалл", "🔥 Легендарка", "👑 Титул"];
-        const prize = prizes[Math.floor(Math.random() * prizes.length)];
-        
-        await interaction.editReply({ content: `# 🎉 ВИКТОРИНА!\n## Приз: ${prize}\n❓ ${question}\n_30 секунд!_` });
-        
-        const collector = interaction.channel.createMessageCollector({ filter: m => !m.author.bot, time: 30000 });
-        
-        collector.on('collect', async (m) => {
-            const jRes = await fetch(HELPER_WORKER, {
+        if (verdict.includes('правильно') || verdict.includes('верно') || verdict.includes('да')) {
+            const roastRes = await fetch(ROAST_WORKER, {
                 method: "POST", headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ message: `Вопрос: "${question}". ${m.author.username} ответил: "${m.content}". Если правильно - обмани что выиграл приз, потом скажи что приза нет и оскорби. Начни с "Поздравляю, ${m.author.username}!" 2 предложения с матом.`, currentAuthor: m.author.username, context: [] })
+                body: JSON.stringify({ 
+                    message: `Оскорби ${m.author.username} за то что поверил в фейковый приз "${prize}". Скажи что приза нет. С матом. 2 предложения.`, 
+                    currentAuthor: m.author.username, context: [] 
+                })
             });
-            const jData = await jRes.json();
-            const verdict = jData.reply || "Поздравляю, ты выиграл НИЧЕГО!";
-            if (verdict.includes('Поздравляю') || verdict.includes('выиграл')) {
-                await m.reply(verdict);
-                collector.stop();
+            const roastData = await roastRes.json();
+            const roast = roastData.reply || "Ха-ха, уёбище, приза нет!";
+            
+            await interaction.followUp({ content: `🎉 ${m.author.username} выиграл! Но... ${roast}` });
+            collector.stop();
+        }
+    });
+    
+    collector.on('end', collected => { 
+        if (!collected || collected.size === 0) {
+            interaction.followUp({ content: "Никто не ответил за 30 секунд! Все тупые!" });
+        }
+    });
+    return;
+}
+
+if (commandName === 'wheel') {
+    const count = interaction.options.getInteger('count') || 5;
+    
+    // Показываем список героев на выбор
+    const heroList = heroes.map((h, i) => `${i+1}. ${h.emoji} **${h.name}** — ${h.title}`).join('\n');
+    
+    await interaction.editReply({ 
+        content: `# 🎯 ВЫБОР ГЕРОЕВ\n${heroList}\n\n**Напиши номера героев через пробел** (например: 1 5 8 12)\n_У тебя 30 секунд на выбор ${count} героев!_` 
+    });
+    
+    const filter = m => m.author.id === interaction.user.id && !m.author.bot;
+    const collector = interaction.channel.createMessageCollector({ filter, time: 30000, max: 1 });
+    
+    collector.on('collect', async (m) => {
+        const numbers = m.content.split(/\s+/).map(n => parseInt(n)).filter(n => n > 0 && n <= heroes.length);
+        const unique = [...new Set(numbers)].slice(0, count);
+        
+        if (unique.length < 2) {
+            await interaction.followUp({ content: '❌ Нужно минимум 2 разных героя!' });
+            return;
+        }
+        
+        let wheelHeroes = unique.map(i => heroes[i-1]);
+        let eliminated = [];
+        
+        await interaction.followUp({ 
+            content: `# 🎯 КОЛЕСО НА ВЫБЫВАНИЕ\nГероев: **${wheelHeroes.length}**\n\n${wheelHeroes.map(h => `${h.emoji} **${h.name}**`).join(' | ')}\n\n_Нажми 🎲 чтобы крутить!_` 
+        });
+        
+        // Ждём реакцию для кручения
+        const lastMsg = await interaction.channel.messages.fetch({ limit: 1 });
+        const wheelMsg = lastMsg.first();
+        await wheelMsg.react('🎲');
+        
+        const reactFilter = (reaction, user) => reaction.emoji.name === '🎲' && !user.bot;
+        const reactCollector = wheelMsg.createReactionCollector({ filter: reactFilter, time: 60000 });
+        
+        reactCollector.on('collect', async (reaction, user) => {
+            if (wheelHeroes.length <= 1) {
+                await interaction.followUp({ content: `# 🏆 ПОБЕДИТЕЛЬ: ${wheelHeroes[0].emoji} **${wheelHeroes[0].name}**!` });
+                reactCollector.stop();
+                return;
+            }
+            
+            // Крутим
+            const loser = wheelHeroes.splice(Math.floor(Math.random() * wheelHeroes.length), 1)[0];
+            eliminated.push(loser);
+            
+            const spinEmojis = ['🎰', '🌀', '💫', '⚡', '🎲'];
+            const spinMsg = await interaction.followUp({ content: `${spinEmojis[Math.floor(Math.random()*5)]} **${user.username} крутит...**` });
+            
+            setTimeout(async () => {
+                await spinMsg.edit({ 
+                    content: `❌ Выбыл: ${loser.emoji} **${loser.name}**\nОсталось: ${wheelHeroes.map(h => `${h.emoji} ${h.name}`).join(' | ')}` 
+                });
+                
+                if (wheelHeroes.length === 1) {
+                    await interaction.followUp({ 
+                        content: `# 🏆 ПОБЕДИТЕЛЬ: ${wheelHeroes[0].emoji} **${wheelHeroes[0].name}**!\nТы будешь играть на этом герое в следующей лиге!` 
+                    });
+                    reactCollector.stop();
+                }
+            }, 1000);
+        });
+        
+        reactCollector.on('end', () => {
+            if (wheelHeroes.length > 1) {
+                interaction.followUp({ content: "Время вышло! Колесо остановлено." });
             }
         });
-        collector.on('end', collected => { if (!collected.size) interaction.followUp('Никто не ответил!'); });
-        return;
-    }
+    });
+    
+    collector.on('end', collected => {
+        if (!collected || collected.size === 0) {
+            interaction.followUp({ content: "Время вышло! Не выбрал героев." });
+        }
+    });
+    return;
+}
     if (commandName === 'savesettings') {
         return interaction.editReply({ content: `BOT_SETTINGS=\n${JSON.stringify(settings)}` });
     }
