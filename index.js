@@ -64,33 +64,23 @@ function buildWheel(heroesArr, highlightIdx = -1, spinEmoji = '🎰', loser = nu
     return `${header}\n${lines.join('\n')}${footer}`;
 }
 
-// Функция парсинга данных с tlidb
-async function parseTlidb(query, lang = 'ru') {
-    const baseUrl = `https://tlidb.com/${lang}`;
-    const searchUrl = `${baseUrl}/search?q=${encodeURIComponent(query)}`;
-    
-    const response = await fetch(searchUrl);
-    const html = await response.text();
-    
-    // Проверяем, не перекинуло ли сразу на страницу предмета
-    const seasonBlocks = [];
+// Парсинг страницы предмета
+async function parseItemPage(html) {
+    const seasons = [];
     const seasonRegex = /<div class="item_ver">([^<]+)<\/div>/g;
     let seasonMatch;
     
     while ((seasonMatch = seasonRegex.exec(html)) !== null) {
         const seasonName = seasonMatch[1].trim();
-        
-        // Ищем блок с данными этого сезона
         const blockStart = html.lastIndexOf('<div class="card ui_item', seasonMatch.index);
         const blockEnd = html.indexOf('</div>\n</div>\n</div>', blockStart);
-        const block = blockEnd > blockStart ? html.substring(blockStart, blockEnd + 6) : '';
+        if (blockEnd === -1) continue;
+        const block = html.substring(blockStart, blockEnd + 6);
         
-        // Парсим данные из блока
         const titleMatch = block.match(/<h5[^>]*>([^<]+)<\/h5>/);
         const imgMatch = block.match(/<img[^>]*src="([^"]+)"[^>]*>/);
         const levelMatch = block.match(/<div class="level">(\d+)<\/div>/);
         
-        // Парсим параметры
         const params = {};
         const paramRegex = /<div class="d-flex justify-content-center">\s*<div>([^<]+)<\/div>\s*<div class="ps-2">([^<]+)<\/div>\s*<\/div>/g;
         let paramMatch;
@@ -98,12 +88,6 @@ async function parseTlidb(query, lang = 'ru') {
             params[paramMatch[1].trim()] = paramMatch[2].trim();
         }
         
-        // Парсим описание
-        const descMatch = block.match(/<div class="explicitMod">([\s\S]*?)<\/div>/);
-        let description = descMatch ? descMatch[1].replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim() : '';
-        description = description.replace(/&quot;/g, '"').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
-        
-        // Парсим теги
         const tags = [];
         const tagRegex = /<span class="[^"]*tag[^"]*">([^<]+)<\/span>/g;
         let tagMatch;
@@ -111,20 +95,18 @@ async function parseTlidb(query, lang = 'ru') {
             tags.push(tagMatch[1].trim());
         }
         
-        seasonBlocks.push({
+        seasons.push({
             season: seasonName,
             title: titleMatch ? titleMatch[1].trim() : '',
             image: imgMatch ? imgMatch[1] : '',
             level: levelMatch ? parseInt(levelMatch[1]) : 0,
-            params,
-            description,
-            tags
+            params, tags
         });
     }
     
     // Парсим таблицу прогрессии
-    const progressionTable = [];
-    const tableRegex = /<table[^>]*>[\s\S]*?<tbody>([\s\S]*?)<\/tbody>/g;
+    const progression = [];
+    const tableRegex = /<tbody>([\s\S]*?)<\/tbody>/g;
     let tableMatch;
     
     while ((tableMatch = tableRegex.exec(html)) !== null) {
@@ -140,121 +122,147 @@ async function parseTlidb(query, lang = 'ru') {
                 const efficiency = cells[1] ? cells[1].replace(/<[^>]+>/g, '').trim() : '';
                 const damage = cells[2] ? cells[2].replace(/<[^>]+>/g, '').trim() : '';
                 if (!isNaN(level)) {
-                    progressionTable.push({ level, efficiency, damage });
+                    progression.push({ level, efficiency, damage });
                 }
             }
         }
     }
     
-    return {
-        query,
-        lang,
-        seasons: seasonBlocks,
-        progression: progressionTable,
-        url: searchUrl
-    };
+    return { seasons, progression };
 }
 
-function formatTlidbResult(data, mode = 'search') {
-    const { seasons, progression } = data;
+// Прямой поиск предмета на tlidb
+async function searchTlidb(name, lang = 'ru') {
+    const cleanName = name.replace(/\s+/g, '_').replace(/'/g, '%27');
     
-    if (mode === 'compare' && seasons.length >= 2) {
-        // Сравнение двух последних сезонов
-        const current = seasons[0];
-        const previous = seasons[1];
+    // Пробуем прямой URL
+    const directUrl = `https://tlidb.com/${lang}/${cleanName}`;
+    try {
+        const response = await fetch(directUrl, { redirect: 'manual' });
+        if (response.status === 200) {
+            const html = await response.text();
+            const data = await parseItemPage(html);
+            if (data.seasons.length > 0 || data.progression.length > 0) {
+                return { ...data, url: directUrl };
+            }
+        }
+    } catch (e) {}
+    
+    // Пробуем через поиск
+    const searchUrl = `https://tlidb.com/${lang}/search?q=${encodeURIComponent(name)}`;
+    const searchResponse = await fetch(searchUrl);
+    
+    // Если поиск перекинул на страницу предмета
+    if (searchResponse.url && searchResponse.url.includes('/') && !searchResponse.url.includes('/search')) {
+        const html = await searchResponse.text();
+        const data = await parseItemPage(html);
+        if (data.seasons.length > 0 || data.progression.length > 0) {
+            return { ...data, url: searchResponse.url };
+        }
+    }
+    
+    // Парсим результаты поиска
+    const html = await searchResponse.text();
+    const data = await parseItemPage(html);
+    
+    // Если нет прямых совпадений, ищем ссылки в результатах
+    if (data.seasons.length === 0 && data.progression.length === 0) {
+        const linkRegex = /<a[^>]*href="(\/[^"]+)"[^>]*>([^<]+)<\/a>/g;
+        let match;
+        const links = [];
+        while ((match = linkRegex.exec(html)) !== null) {
+            const link = match[1];
+            const text = match[2].trim();
+            if (link.includes('/') && text.length > 3 && !text.includes('<')) {
+                links.push({ title: text, url: `https://tlidb.com${link}` });
+            }
+        }
+        return { ...data, url: searchUrl, suggestions: links.slice(0, 5) };
+    }
+    
+    return { ...data, url: searchUrl };
+}
+
+// Форматирование результата
+function formatResult(data, topic, action, levels = []) {
+    const { seasons, progression, url, suggestions } = data;
+    
+    // Если ничего не найдено
+    if (seasons.length === 0 && progression.length === 0) {
+        let result = `## ❌ Ничего не найдено\n`;
+        if (suggestions && suggestions.length > 0) {
+            result += `**Возможно вы искали:**\n`;
+            suggestions.forEach(s => result += `• [${s.title}](${s.url})\n`);
+        } else {
+            result += `[Открыть поиск на tlidb.com](${url})`;
+        }
+        return result;
+    }
+    
+    // Сравнение уровней
+    if (action === 'level_diff' && levels.length >= 2 && progression.length > 0) {
+        const [lvl1, lvl2] = levels.slice(0, 2).sort((a,b) => a-b);
+        const row1 = progression.find(r => r.level === lvl1);
+        const row2 = progression.find(r => r.level === lvl2);
         
-        let result = `## 📊 СРАВНЕНИЕ СЕЗОНОВ\n`;
-        result += `### ${current.season} vs ${previous.season}\n`;
-        result += `**${current.title}**\n\n`;
-        
-        result += `| Параметр | ${current.season} | ${previous.season} | Изменение |\n`;
-        result += `|---|---|---|---|\n`;
-        
-        // Сравниваем параметры
+        if (row1 && row2) {
+            const eff1 = parseFloat(row1.efficiency) || 0;
+            const eff2 = parseFloat(row2.efficiency) || 0;
+            const diff = eff2 - eff1;
+            
+            let result = `## 📊 ${topic}\n**${seasons[0]?.title || ''}**\n\n`;
+            result += `| Параметр | Ур.${lvl1} | Ур.${lvl2} | Изменение |\n|---|---|---|---|\n`;
+            result += `| Эффективность | ${row1.efficiency} | ${row2.efficiency} | ${diff > 0 ? '📈 +'+diff+'%' : diff < 0 ? '📉 '+diff+'%' : '➡️ 0'} |\n`;
+            result += `| Урон | ${row1.damage || '—'} | ${row2.damage || '—'} | — |\n`;
+            if (diff !== 0) result += `\n### 🎯 Итог\nПрокачка с ${lvl1} на ${lvl2}: **${diff > 0 ? '+' : ''}${diff}%** (≈${(diff/(lvl2-lvl1)).toFixed(1)}% за уровень)`;
+            result += `\n\n[Открыть на tlidb](${url})`;
+            return result;
+        }
+    }
+    
+    // Сравнение сезонов
+    if (action === 'compare' && seasons.length >= 2) {
+        const [current, previous] = seasons;
+        let result = `## 📊 ${topic}\n### ${current.season} vs ${previous.season}\n\n`;
+        result += `| Параметр | ${current.season} | ${previous.season} | Изменение |\n|---|---|---|---|\n`;
         const allKeys = new Set([...Object.keys(current.params), ...Object.keys(previous.params)]);
         for (const key of allKeys) {
             const curr = current.params[key] || '—';
             const prev = previous.params[key] || '—';
-            let change = '';
-            
-            if (curr !== '—' && prev !== '—') {
-                const currNum = parseFloat(curr);
-                const prevNum = parseFloat(prev);
-                if (!isNaN(currNum) && !isNaN(prevNum)) {
-                    const diff = currNum - prevNum;
-                    change = diff > 0 ? `📈 +${diff}` : diff < 0 ? `📉 ${diff}` : '➡️ 0';
-                } else {
-                    change = curr !== prev ? '🔄' : '➡️';
-                }
-            } else {
-                change = '🆕';
-            }
-            
+            const cNum = parseFloat(curr), pNum = parseFloat(prev);
+            const change = !isNaN(cNum) && !isNaN(pNum) ? (cNum-pNum > 0 ? '📈 +'+(cNum-pNum) : cNum-pNum < 0 ? '📉 '+(cNum-pNum) : '➡️ 0') : '🔄';
             result += `| ${key} | ${curr} | ${prev} | ${change} |\n`;
         }
-        
+        result += `\n[Открыть на tlidb](${url})`;
         return result;
     }
     
-    if (mode === 'progression' && progression.length > 0) {
-        let result = `## 📈 ПРОГРЕССИЯ УРОВНЕЙ\n`;
-        result += `**${seasons[0]?.title || ''}**\n\n`;
-        result += `| Уровень | Эффективность | Урон | Прибавка |\n`;
-        result += `|---|---|---|---|\n`;
-        
-        let prevEff = 0;
-        for (const row of progression) {
-            const effNum = parseFloat(row.efficiency) || 0;
-            const diff = prevEff > 0 ? `+${effNum - prevEff}%` : '—';
-            result += `| ${row.level} | ${row.efficiency} | ${row.damage} | ${diff} |\n`;
-            prevEff = effNum;
+    // Прогрессия
+    if (action === 'progression' && progression.length > 0) {
+        let result = `## 📈 ${topic}\n**${seasons[0]?.title || ''}**\n\n`;
+        result += `| Ур. | Эффект. | Урон | +% |\n|---|---|---|---|\n`;
+        let prev = 0;
+        for (const row of progression.slice(0, 15)) {
+            const curr = parseFloat(row.efficiency) || 0;
+            result += `| ${row.level} | ${row.efficiency} | ${row.damage || '—'} | ${prev > 0 ? '+'+(curr-prev).toFixed(1)+'%' : '—'} |\n`;
+            prev = curr;
         }
-        
-        // Анализ
-        if (progression.length >= 2) {
-            const firstEff = parseFloat(progression[0].efficiency) || 0;
-            const lastEff = parseFloat(progression[progression.length-1].efficiency) || 0;
-            const totalGain = lastEff - firstEff;
-            result += `\n### 📊 АНАЛИЗ\n`;
-            result += `🔹 С 1 по ${progression.length} уровень: **+${totalGain}%** к эффективности\n`;
-            result += `🔹 Средняя прибавка за уровень: **+${(totalGain/(progression.length-1)).toFixed(1)}%**\n`;
-        }
-        
+        if (progression.length > 15) result += `| ... | ... | ... | ... |\n`;
+        result += `\n[Открыть на tlidb](${url})`;
         return result;
     }
     
     // Обычный поиск
-    let result = `## 🔍 ${data.query}\n`;
-    
-    for (const season of seasons) {
-        result += `### 🏷 ${season.season}\n`;
-        result += `**${season.title}** (ур. ${season.level})\n`;
-        
-        if (season.tags.length) {
-            result += `🎯 ${season.tags.join(' · ')}\n`;
-        }
-        
-        if (Object.keys(season.params).length) {
-            result += `\n⚙️ **Параметры:**\n`;
-            for (const [key, value] of Object.entries(season.params)) {
-                result += `• ${key}: **${value}**\n`;
-            }
-        }
-        
-        if (season.description) {
-            result += `\n📝 ${season.description.substring(0, 300)}...\n`;
-        }
-        
+    let result = `## 🔍 ${topic}\n`;
+    for (const season of seasons.slice(0, 2)) {
+        result += `### 🏷 ${season.season} — ${season.title}\n`;
+        if (season.tags.length) result += `🎯 ${season.tags.join(' · ')}\n`;
+        for (const [k, v] of Object.entries(season.params)) result += `• ${k}: **${v}**\n`;
         result += `\n`;
     }
-    
-    if (progression.length > 0) {
-        result += `\n📊 Доступна прогрессия уровней! Используй **Сравнить сезоны** или **Прогрессия** в меню.`;
-    }
-    
-    result += `\n\n🔗 [Открыть на tlidb.com](${data.url})`;
-    
-    return result.substring(0, 1900);
+    if (progression.length > 0) result += `📊 Доступна прогрессия уровней!\n`;
+    result += `\n[Открыть на tlidb](${url})`;
+    return result;
 }
 
 const client = new Client({
@@ -282,15 +290,9 @@ const commands = [
         .addIntegerOption(o => o.setName('count').setDescription('2-8').setRequired(false).setMinValue(2).setMaxValue(8)),
     new SlashCommandBuilder().setName('quiz').setDescription('Викторина'),
     new SlashCommandBuilder().setName('tlidb').setDescription('Поиск в базе Torchlight Infinite')
-        .addStringOption(o => o.setName('query').setDescription('Что искать (можно криво)').setRequired(true))
+        .addStringOption(o => o.setName('query').setDescription('Что искать').setRequired(true))
         .addStringOption(o => o.setName('lang').setDescription('Язык').setRequired(false)
-            .addChoices({ name: 'Русский', value: 'ru' }, { name: 'English', value: 'en' }))
-        .addStringOption(o => o.setName('mode').setDescription('Режим').setRequired(false)
-            .addChoices(
-                { name: '🔍 Поиск', value: 'search' },
-                { name: '📊 Сравнить сезоны', value: 'compare' },
-                { name: '📈 Прогрессия уровней', value: 'progression' }
-            )),
+            .addChoices({ name: 'Русский', value: 'ru' }, { name: 'English', value: 'en' })),
     new SlashCommandBuilder().setName('savesettings').setDescription('Сохранить'),
     new SlashCommandBuilder().setName('settings').setDescription('Настройки'),
     new SlashCommandBuilder().setName('cleanup').setDescription('Очистка'),
@@ -353,35 +355,42 @@ client.on('interactionCreate', async (interaction) => {
     if (commandName === 'tlidb') {
         await interaction.deferReply();
         const query = interaction.options.getString('query');
-        const lang = interaction.options.getString('lang') || 'ru';
-        const mode = interaction.options.getString('mode') || 'search';
+        const forcedLang = interaction.options.getString('lang');
         
-        // AI исправляет запрос
-        const fixRes = await fetch(HELPER_WORKER, {
+        // AI анализирует запрос
+        const aiRes = await fetch(HELPER_WORKER, {
             method: "POST", headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ 
-                message: `Пользователь ищет в Torchlight Infinite: "${query}". Исправь на правильное английское название. Только название. Например: "лип слам" → "Leap Attack", "миррор" → "Mirror".`, 
+                message: `Проанализируй запрос о Torchlight Infinite: "${query}". ${forcedLang ? 'Язык: '+forcedLang : 'Определи язык сам (ru/en)'}.
+
+Ответь СТРОГО ТОЛЬКО JSON:
+{"name":"ТОЧНОЕ название для поиска на tlidb","lang":"ru или en","action":"search/compare/progression/level_diff","levels":[числа],"topic":"краткое описание"}
+
+Извлеки ТОЛЬКО название предмета/скилла/героя. "тандер спайк 21 35" → name:"Thunder Spike" levels:[21,35] action:"level_diff"
+"что поменяли у геммы" → name:"Gemma" action:"compare"
+"лип атак" → name:"Leap Attack" или "Атака в прыжке" action:"search"`,
                 currentAuthor: interaction.user.username, context: [] 
             })
         });
-        const fixData = await fixRes.json();
-        const fixedQuery = fixData.reply || query;
         
-        console.log(`🔍 "${query}" → "${fixedQuery}" (${mode})`);
+        let aiData;
+        try {
+            const aiText = (await aiRes.json()).reply || '';
+            const jsonMatch = aiText.match(/\{[\s\S]*\}/);
+            aiData = jsonMatch ? JSON.parse(jsonMatch[0]) : { name: query, lang: forcedLang || 'ru', action: 'search', levels: [], topic: query };
+        } catch (e) {
+            aiData = { name: query, lang: forcedLang || 'ru', action: 'search', levels: [], topic: query };
+        }
+        
+        const { name, lang, action, levels, topic } = aiData;
+        console.log(`🔍 "${query}" → "${name}" [${lang}] ${action} ур.${levels.join(',')}`);
         
         try {
-            const data = await parseTlidb(fixedQuery, lang);
-            
-            if (data.seasons.length === 0 && data.progression.length === 0) {
-                await interaction.editReply({ content: `❌ Ничего не найдено для "${fixedQuery}"\n🔗 ${data.url}` });
-                return;
-            }
-            
-            const result = formatTlidbResult(data, mode);
-            await interaction.editReply({ content: result });
-            
+            const data = await searchTlidb(name, lang);
+            const result = formatResult(data, topic || query, action, levels);
+            await interaction.editReply({ content: result.substring(0, 2000) });
         } catch (e) {
-            await interaction.editReply({ content: `❌ Ошибка: ${e.message}\n🔗 https://tlidb.com/${lang}/search?q=${encodeURIComponent(fixedQuery)}` });
+            await interaction.editReply({ content: `❌ Ошибка: ${e.message}` });
         }
         return;
     }
@@ -426,7 +435,7 @@ client.on('interactionCreate', async (interaction) => {
             const wheelMsg = await interaction.followUp({ content: buildWheel(wheelHeroes) });
             await wheelMsg.react('🎲');
             const reactCollector = wheelMsg.createReactionCollector({ filter: (r, u) => r.emoji.name === '🎲' && !u.bot });
-            reactCollector.on('collect', async (reaction, user) => {
+            reactCollector.on('collect', async () => {
                 if (wheelHeroes.length <= 1) { reactCollector.stop(); return; }
                 for (let spin = 0; spin < 5; spin++) {
                     await new Promise(r => setTimeout(r, 300));
