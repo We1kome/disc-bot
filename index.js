@@ -85,7 +85,7 @@ function formatPoE2Message(data) {
     const filled = Math.floor(progress / 5);
     const empty = 20 - filled;
     
-    const targetDate = new Date(Date.now() + totalSeconds * 1000);
+const targetDate = new Date(settings.poe2LeagueDate);
     
     // МСК
     const mskTime = new Date(targetDate.toLocaleString('en-US', { timeZone: 'Europe/Moscow' }));
