@@ -37,7 +37,7 @@ async function setPoE2Date(userInput) {
         body: JSON.stringify({ 
             message: `Извлеки дату и время. Ответь СТРОГО: YYYY-MM-DD HH:MM
 
-"29 мая 2 часа 50 минут" → 2026-05-29 02:50
+"29 мая 2 часа 47 минут" → 2026-05-29 02:47
 "29 мая 22:00 МСК" → 2026-05-29 22:00
 
 Фраза: "${userInput}"`,
@@ -50,9 +50,13 @@ async function setPoE2Date(userInput) {
     
     const match = reply.match(/(\d{4})-(\d{2})-(\d{2})\s+(\d{2}):?(\d{2})/);
     if (match) {
-        // ВАЖНО: создаём дату с указанием МСК (UTC+3)
-        const targetDate = new Date(`${match[1]}-${match[2]}-${match[3]}T${match[4]}:${match[5]}:00+03:00`);
+        // Создаём дату в МСК вручную, без JS-парсинга
+        const targetDate = new Date();
+        targetDate.setFullYear(parseInt(match[1]), parseInt(match[2]) - 1, parseInt(match[3]));
+        targetDate.setHours(parseInt(match[4]), parseInt(match[5]), 0, 0);
+        
         const seconds = Math.floor((targetDate - now) / 1000);
+        console.log('🎯 Целевая дата:', targetDate.toISOString(), 'Секунд:', seconds);
         
         if (seconds > 60 && seconds < 315360000) {
             poe2LeagueSeconds = seconds;
