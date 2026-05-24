@@ -20,7 +20,6 @@ if (process.env.BOT_SETTINGS) {
     try { settings = JSON.parse(process.env.BOT_SETTINGS); if (!settings.admins) settings.admins = []; } catch (e) {}
 }
 
-// Хранилище таймера PoE2
 let poe2TimerMessage = null;
 let poe2TimerChannel = null;
 let poe2TimerInterval = null;
@@ -44,105 +43,40 @@ async function getPoE2TimerData() {
 
 async function setPoE2Date(userInput) {
     const now = new Date();
-    let seconds = null;
     
-    // РУЧНОЙ ПАРСИНГ — без AI, мгновенно и точно
+    const aiRes = await fetch(HELPER_WORKER, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ 
+            message: `Сейчас: ${now.toISOString()} (МСК: ${now.toLocaleString('ru-RU', {timeZone: 'Europe/Moscow'})})
+Текущий таймер: ${poe2LeagueSeconds ? Math.floor(poe2LeagueSeconds) + ' секунд до лиги' : 'не установлен'}
+
+Пользователь написал: "${userInput}"
+
+Вычисли сколько СЕКУНД осталось до лиги PoE2. Ответь ТОЛЬКО одним числом.
+
+Правила:
+- "через 5 дней 3 часа 23 минуты" → 5*86400 + 3*3600 + 23*60
+- "через 5 дней 3 часа 23 минуты 0 сек" → тоже самое, игнорируй "0 сек"
+- "29 мая 22:00 МСК" → разница между сейчас и 2026-05-29T22:00:00+03:00
+- "прибавь 1 час" → текущий_таймер + 3600
+- "отними 10 минут" → текущий_таймер - 600
+- Если текущий таймер не установлен, а просят "прибавь" — считай от 0`,
+            currentAuthor: "timer", context: [] 
+        })
+    });
     
-    // "через X дней Y часов Z минут W секунд"
-    const throughMatch = userInput.match(/через\s*(\d+)\s*д(?:ень|ня|ней)?\s*(?:и\s*)?(\d+)\s*час(?:а|ов)?\s*(?:и\s*)?(\d+)\s*минут(?:у|ы)?\s*(?:и\s*)?(\d+)\s*секунд(?:у|ы)?/i);
-    if (throughMatch) {
-        const d = parseInt(throughMatch[1]) || 0;
-        const h = parseInt(throughMatch[2]) || 0;
-        const m = parseInt(throughMatch[3]) || 0;
-        const s = parseInt(throughMatch[4]) || 0;
-        seconds = d * 86400 + h * 3600 + m * 60 + s;
-        console.log(`✅ Ручной парсинг: ${d}д ${h}ч ${m}м ${s}с = ${seconds} сек`);
-    }
+    const reply = (await aiRes.json()).reply || '';
+    console.log('🤖 AI:', reply);
     
-    // "X мая через Y часов Z минут"
-    if (!seconds) {
-        const dateThroughMatch = userInput.match(/(\d+)\s*мая\s*через\s*(\d+)\s*час(?:а|ов)?\s*(?:и\s*)?(\d+)\s*минут(?:у|ы)?/i);
-        if (dateThroughMatch) {
-            const day = parseInt(dateThroughMatch[1]);
-            const h = parseInt(dateThroughMatch[2]) || 0;
-            const m = parseInt(dateThroughMatch[3]) || 0;
-            const target = new Date(2026, 4, day, h, m, 0); // май = 4
-            seconds = Math.floor((target - now) / 1000);
-            console.log(`✅ Дата+время: ${day} мая ${h}:${m} = ${seconds} сек`);
+    const match = reply.match(/\d+/);
+    if (match) {
+        const seconds = parseInt(match[0]);
+        if (seconds > 60 && seconds < 315360000) {
+            poe2LeagueSeconds = seconds;
+            const target = new Date(now.getTime() + seconds * 1000);
+            const formatted = target.toLocaleString('ru-RU', { timeZone: 'Europe/Moscow', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' });
+            return { success: true, date: target, formatted };
         }
-    }
-    
-    // "X мая YY:ZZ МСК"
-    if (!seconds) {
-        const dateTimeMatch = userInput.match(/(\d+)\s*мая\s*(\d{1,2}):(\d{2})\s*(?:МСК|MSK)?/i);
-        if (dateTimeMatch) {
-            const day = parseInt(dateTimeMatch[1]);
-            const h = parseInt(dateTimeMatch[2]);
-            const m = parseInt(dateTimeMatch[3]);
-            const target = new Date(2026, 4, day, h, m, 0);
-            seconds = Math.floor((target - now) / 1000);
-            console.log(`✅ Дата+время2: ${day} мая ${h}:${m} = ${seconds} сек`);
-        }
-    }
-    
-    // "прибавь X часов" или "+X часов"
-    if (!seconds) {
-        const addMatch = userInput.match(/(?:прибавь|добавь|\+)\s*(\d+)\s*час(?:а|ов)?/i);
-        if (addMatch && poe2LeagueSeconds) {
-            seconds = poe2LeagueSeconds + parseInt(addMatch[1]) * 3600;
-            console.log(`✅ Прибавка: +${addMatch[1]}ч = ${seconds} сек`);
-        }
-    }
-    
-    // "отними X часов" или "-X часов"
-    if (!seconds) {
-        const subMatch = userInput.match(/(?:отними|убравь|убавь|\-)\s*(\d+)\s*час(?:а|ов)?/i);
-        if (subMatch && poe2LeagueSeconds) {
-            seconds = poe2LeagueSeconds - parseInt(subMatch[1]) * 3600;
-            console.log(`✅ Убавка: -${subMatch[1]}ч = ${seconds} сек`);
-        }
-    }
-    
-    // "прибавь X минут"
-    if (!seconds) {
-        const addMinMatch = userInput.match(/(?:прибавь|добавь|\+)\s*(\d+)\s*минут(?:у|ы)?/i);
-        if (addMinMatch && poe2LeagueSeconds) {
-            seconds = poe2LeagueSeconds + parseInt(addMinMatch[1]) * 60;
-        }
-    }
-    
-    // "прибавь X секунд" (любые вариации)
-    if (!seconds && poe2LeagueSeconds) {
-        const addSecMatch = userInput.match(/(?:прибавь|добавь|\+)\s*(\d+)\s*(?:секунд|сек|sec|s)/i);
-        if (addSecMatch) seconds = poe2LeagueSeconds + parseInt(addSecMatch[1]);
-    }
-    if (!seconds && poe2LeagueSeconds) {
-        const subSecMatch = userInput.match(/(?:отними|убравь|убавь|\-)\s*(\d+)\s*(?:секунд|сек|sec|s)/i);
-        if (subSecMatch) seconds = poe2LeagueSeconds - parseInt(subSecMatch[1]);
-    }
-    
-    // Если ручной парсинг не сработал — пробуем AI
-    if (!seconds) {
-        console.log('🤖 Ручной парсинг не сработал, пробую AI...');
-        const aiRes = await fetch(HELPER_WORKER, {
-            method: "POST", headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ 
-                message: `Сейчас: ${now.toLocaleString('ru-RU', {timeZone: 'Europe/Moscow'})} МСК (${Math.floor(now.getTime()/1000)} секунд от эпохи). Вычисли сколько СЕКУНД до лиги PoE2: "${userInput}". Ответь ТОЛЬКО числом. Например "через 5 дней" = ${5*86400}, "29 мая 22:00 МСК" = разница в секундах.`,
-                currentAuthor: "timer", context: [] 
-            })
-        });
-        const reply = (await aiRes.json()).reply || '';
-        console.log('🤖 AI ответ:', reply);
-        const match = reply.match(/\d+/);
-        if (match) seconds = parseInt(match[0]);
-    }
-    
-    if (seconds && seconds > 60 && seconds < 315360000) {
-        poe2LeagueSeconds = seconds;
-        // НЕ перезапускаем таймер здесь — он сам обновится через setInterval
-        const target = new Date(now.getTime() + seconds * 1000);
-        const formatted = target.toLocaleString('ru-RU', { timeZone: 'Europe/Moscow', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' });
-        return { success: true, date: target, formatted };
     }
     
     return { success: false };
@@ -205,6 +139,7 @@ function getSecondWord(s) { const n = s % 100; if (n >= 11 && n <= 14) return '�
 
 async function updatePoE2Timer() {
     if (!poe2TimerMessage || !poe2TimerChannel) return;
+    if (poe2LeagueSeconds !== null) poe2LeagueSeconds -= 2;
     const data = await getPoE2TimerData();
     try { await poe2TimerMessage.edit({ content: formatPoE2Message(data).substring(0, 2000) }); } catch (e) {}
 }
@@ -494,7 +429,7 @@ const commands = [
         .addIntegerOption(o => o.setName('count').setDescription('2-8').setRequired(false).setMinValue(2).setMaxValue(8)),
     new SlashCommandBuilder().setName('quiz').setDescription('🎉 Викторина с призом'),
     new SlashCommandBuilder().setName('poe2set').setDescription('📅 Установить дату лиги PoE2')
-        .addStringOption(o => o.setName('date').setDescription('Дата (например: 29 мая 22:00 МСК или через 5 дней)').setRequired(true)),
+        .addStringOption(o => o.setName('date').setDescription('Например: 29 мая 22:00 МСК или через 5 дней 3 часа').setRequired(true)),
     new SlashCommandBuilder().setName('poe2').setDescription('⏳ Запустить таймер до лиги PoE2'),
     new SlashCommandBuilder().setName('poe2stop').setDescription('⏹ Остановить таймер PoE2'),
     new SlashCommandBuilder().setName('savesettings').setDescription('Сохранить настройки'),
@@ -514,7 +449,6 @@ client.on('ready', async () => {
 
 client.on('interactionCreate', async (interaction) => {
     if (!interaction.isChatInputCommand()) return;
-    
     const { commandName } = interaction;
     
     if (commandName === 'loveadmin') {
@@ -529,60 +463,35 @@ client.on('interactionCreate', async (interaction) => {
         const user = interaction.options.getUser('user');
         if (!user) return interaction.editReply({ content: '❌ Укажи пользователя' });
         if (user.id === OWNER_ID) return interaction.editReply({ content: '❌ Владелец всегда админ' });
-        if (action === 'add') {
-            if (!settings.admins.includes(user.id)) { settings.admins.push(user.id); return interaction.editReply({ content: `✅ ${user.tag} теперь админ` }); }
-            return interaction.editReply({ content: '⚠️ Уже админ' });
-        }
+        if (action === 'add') { if (!settings.admins.includes(user.id)) { settings.admins.push(user.id); return interaction.editReply({ content: `✅ ${user.tag} теперь админ` }); } return interaction.editReply({ content: '⚠️ Уже админ' }); }
         if (action === 'remove') { settings.admins = settings.admins.filter(id => id !== user.id); return interaction.editReply({ content: `✅ ${user.tag} удалён` }); }
         return;
     }
     
-    // poe2 команды доступны всем
     if (commandName === 'poe2set') {
         await interaction.deferReply({ flags: 64 });
-        const dateInput = interaction.options.getString('date');
-        const result = await setPoE2Date(dateInput);
-        if (result.success) {
-            const formatted = result.date.toLocaleString('ru-RU', { timeZone: 'Europe/Moscow', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' });
-            await interaction.editReply({ content: `✅ Дата лиги: **${formatted} МСК**\nИспользуй /poe2 для таймера!` });
-        } else {
-            await interaction.editReply({ content: '❌ Не удалось распознать дату. Попробуй: "29 мая 22:00 МСК" или "через 5 дней"' });
-        }
+        const result = await setPoE2Date(interaction.options.getString('date'));
+        if (result.success) await interaction.editReply({ content: `✅ Дата лиги: **${result.formatted} МСК**\nИспользуй /poe2 для таймера!` });
+        else await interaction.editReply({ content: '❌ Не удалось распознать дату. Попробуй: "29 мая 22:00 МСК" или "через 5 дней"' });
         return;
     }
-    
-    if (commandName === 'poe2') {
-        await interaction.deferReply({ flags: 64 });
-        await startPoE2Timer(interaction.channel);
-        await interaction.editReply({ content: '✅ Таймер запущен!' });
-        return;
-    }
-    
-    if (commandName === 'poe2stop') {
-        await interaction.deferReply({ flags: 64 });
-        await stopPoE2Timer();
-        await interaction.editReply({ content: '✅ Таймер остановлен!' });
-        return;
-    }
+    if (commandName === 'poe2') { await interaction.deferReply({ flags: 64 }); await startPoE2Timer(interaction.channel); await interaction.editReply({ content: '✅ Таймер запущен!' }); return; }
+    if (commandName === 'poe2stop') { await interaction.deferReply({ flags: 64 }); await stopPoE2Timer(); await interaction.editReply({ content: '✅ Таймер остановлен!' }); return; }
     
     if (commandName === 'quiz') {
         await interaction.deferReply();
         const qRes = await fetch(HELPER_WORKER, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ message: "Придумай ТУПОЙ и ГРУБЫЙ вопрос с чёрным юмором. Используй мат. 1 предложение. Только вопрос.", currentAuthor: interaction.user.username, context: [] }) });
-        const qData = await qRes.json();
-        const question = qData.reply || "Почему ты тупой?";
+        const question = (await qRes.json()).reply || "Почему ты тупой?";
         const pRes = await fetch(HELPER_WORKER, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ message: "Придумай смешной фейковый приз (1-3 слова с эмодзи).", currentAuthor: interaction.user.username, context: [] }) });
-        const pData = await pRes.json();
-        const prize = pData.reply || "💎 1000 FE";
+        const prize = (await pRes.json()).reply || "💎 1000 FE";
         await interaction.editReply({ content: `# 🎉 ВИКТОРИНА!\n## Приз: ${prize}\n❓ ${question}\n_Жду 30 секунд, потом выберу лучший ответ!_` });
         const answers = [];
         const collector = interaction.channel.createMessageCollector({ filter: m => !m.author.bot, time: 30000 });
         collector.on('collect', (m) => answers.push({ author: m.author.username, content: m.content }));
         collector.on('end', async () => {
             if (answers.length === 0) { await interaction.followUp('Никто не ответил! Все тупые, пиздец!'); return; }
-            const answersText = answers.map((a, i) => `${i+1}. ${a.author}: "${a.content}"`).join('\n');
-            const jRes = await fetch(HELPER_WORKER, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ message: `Викторина. Вопрос: "${question}". Приз: "${prize}".\n\nОтветы:\n${answersText}\n\nВыбери САМЫЙ СМЕШНОЙ ответ. Напиши: "Поздравляю, [имя]! Ты выиграл [приз]... но приза нет! [оскорбление, 1-2 предложения]".`, currentAuthor: "судья", context: [] }) });
-            const jData = await jRes.json();
-            await interaction.followUp((jData.reply || `Поздравляю, ${answers[0].author}! Ты выиграл ${prize}... но приза нет!`).substring(0, 500));
+            const jRes = await fetch(HELPER_WORKER, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ message: `Викторина. Вопрос: "${question}". Приз: "${prize}".\n\nОтветы:\n${answers.map((a,i) => `${i+1}. ${a.author}: "${a.content}"`).join('\n')}\n\nВыбери САМЫЙ СМЕШНОЙ ответ. Напиши: "Поздравляю, [имя]! Ты выиграл [приз]... но приза нет! [оскорбление, 1-2 предложения]".`, currentAuthor: "судья", context: [] }) });
+            await interaction.followUp(((await jRes.json()).reply || `Поздравляю, ${answers[0].author}! Ты выиграл ${prize}... но приза нет!`).substring(0, 500));
         });
         return;
     }
@@ -592,8 +501,7 @@ client.on('interactionCreate', async (interaction) => {
         await interaction.deferReply();
         const heroList = heroes.map((h, i) => `${i+1}. ${h.emoji} **${getHeroDisplay(h, i, heroes)}** — ${h.title}`).join('\n');
         await interaction.editReply({ content: `# 🎯 ВЫБОР ГЕРОЕВ\n${heroList}\n\n**Напиши номера через пробел**\n_30 секунд!_` });
-        const filter = m => m.author.id === interaction.user.id;
-        const collector = interaction.channel.createMessageCollector({ filter, time: 30000, max: 1 });
+        const collector = interaction.channel.createMessageCollector({ filter: m => m.author.id === interaction.user.id, time: 30000, max: 1 });
         collector.on('collect', async (m) => {
             const numbers = m.content.split(/\s+/).map(n => parseInt(n)).filter(n => n > 0 && n <= heroes.length);
             const unique = [...new Set(numbers)].slice(0, count);
@@ -615,8 +523,7 @@ client.on('interactionCreate', async (interaction) => {
         return;
     }
     
-    if (!isAdmin(interaction.user.id)) return interaction.reply({ content: '🚫 Нет прав! Используй /wheel /quiz /poe2 /poe2set /poe2stop', flags: 64 });
-    
+    if (!isAdmin(interaction.user.id)) return interaction.reply({ content: '🚫 Нет прав! /wheel /quiz /poe2 /poe2set /poe2stop', flags: 64 });
     if (commandName === 'cleanup') { await interaction.deferReply({ flags: 64 }); await rest.put(Routes.applicationCommands(CLIENT_ID), { body: [] }); await new Promise(r => setTimeout(r, 2000)); await rest.put(Routes.applicationCommands(CLIENT_ID), { body: commands }); return interaction.editReply({ content: '✅ Готово' }); }
     await interaction.deferReply({ flags: 64 });
     if (commandName === 'toggle') { settings.enabled = interaction.options.getString('state') === 'on'; return interaction.editReply({ content: settings.enabled ? '✅ Вкл' : '❌ Выкл' }); }
@@ -640,16 +547,7 @@ client.on('messageReactionRemove', async (reaction, user) => {
 client.on('messageCreate', async (message) => {
     if (message.author.bot) return;
     if (settings.autoReactions[message.author.id]) { try { const arr = Array.isArray(settings.autoReactions[message.author.id]) ? settings.autoReactions[message.author.id] : [settings.autoReactions[message.author.id]]; for (const emoji of arr) { await message.react(emoji); await new Promise(r => setTimeout(r, 200)); } } catch (e) {} }
-    
-    if (message.channel.id === TLIDB_CHANNEL && !message.content.startsWith('/') && message.content.length > 2) {
-        try {
-            await message.channel.sendTyping();
-            const data = await smartSearch(message.content);
-            await message.reply(formatResult(data, message.content).substring(0, 2000));
-        } catch (e) { await message.reply('❌ Ошибка поиска'); }
-        return;
-    }
-    
+    if (message.channel.id === TLIDB_CHANNEL && !message.content.startsWith('/') && message.content.length > 2) { try { await message.channel.sendTyping(); const data = await smartSearch(message.content); await message.reply(formatResult(data, message.content).substring(0, 2000)); } catch (e) { await message.reply('❌ Ошибка поиска'); } return; }
     if (!settings.enabled) return;
     if (message.content.startsWith('/')) return;
     const channelId = message.channel.id;
