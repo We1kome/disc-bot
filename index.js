@@ -44,29 +44,18 @@ async function getPoE2TimerData() {
 async function setPoE2Date(userInput) {
     const now = new Date();
     const mskTime = now.toLocaleString('ru-RU', { timeZone: 'Europe/Moscow' });
-    const nskTime = now.toLocaleString('ru-RU', { timeZone: 'Asia/Novosibirsk' });
     
     const aiRes = await fetch(HELPER_WORKER, {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ 
-            message: `Ты — таймер для России. Работаешь ТОЛЬКО с часовыми поясами РФ.
+            message: `Посчитай СЕКУНДЫ до лиги. Ответь ТОЛЬКО числом.
 
-СЕЙЧАС:
-- Москва (МСК, UTC+3): ${mskTime}
-- Новосибирск (НСК, UTC+7): ${nskTime}
-
-Пользователь написал: "${userInput}"
-${poe2LeagueSeconds ? `Текущий таймер: ${Math.floor(poe2LeagueSeconds)} секунд` : 'Таймер не установлен'}
-
-Вычисли СЕКУНДЫ до лиги PoE2.
-
-ПРИМЕРЫ:
-"5 дней 3 часа 30 минут" → (5×86400) + (3×3600) + (30×60) = ${5*86400 + 3*3600 + 30*60}
-"29 мая 22:00 МСК" → разница между ${mskTime} и 29 мая 2026 22:00 МСК в секундах
+Правила:
+"5 дней 3 часа 13 минут 20 сек" → 5*86400 + 3*3600 + 13*60 + 20 = ${5*86400 + 3*3600 + 13*60 + 20}
 "прибавь 1 час" → ${poe2LeagueSeconds ? Math.floor(poe2LeagueSeconds) + 3600 : 3600}
-"отними 10 минут" → ${poe2LeagueSeconds ? Math.floor(poe2LeagueSeconds) - 600 : 0}
+"29 мая 22:00 МСК" → разница между ${mskTime} и 29.05.2026 22:00 МСК
 
-Ответь ТОЛЬКО целым числом секунд.`,
+Запрос: "${userInput}"`,
             currentAuthor: "timer", context: [] 
         })
     });
@@ -74,7 +63,7 @@ ${poe2LeagueSeconds ? `Текущий таймер: ${Math.floor(poe2LeagueSecon
     const reply = (await aiRes.json()).reply || '';
     console.log('🤖 AI:', reply);
     
-    const match = reply.match(/-?\d+/);
+    const match = reply.match(/\d+/);
     if (match) {
         const seconds = parseInt(match[0]);
         if (seconds > 60 && seconds < 315360000) {
