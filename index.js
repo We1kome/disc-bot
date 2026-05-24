@@ -31,23 +31,10 @@ function isAdmin(userId) { return userId === OWNER_ID || settings.admins.include
 
 // ========== POE2 TIMER ==========
 async function getPoE2TimerData() {
-    console.log('⏳ Ищу дату лиги PoE2...');
-    
-    try {
-        // 1. Пробуем страницу /news
-        const newsRes = await fetch('https://pathofexile2.com/news');
-        const newsHtml = await newsRes.text();
-        
-        const allDates = newsHtml.match(/\d{4}-\d{2}-\d{2}/g) || [];
-        const futureDates = allDates
-            .map(d => new Date(d + 'T22:00:00+03:00'))
-            .filter(d => d > new Date())
-            .sort((a, b) => a - b);
-        
-        if (futureDates.length > 0) {
-            const target = futureDates[0];
+    if (settings.poe2LeagueDate) {
+        const target = new Date(settings.poe2LeagueDate);
+        if (target > new Date()) {
             const diff = target - Date.now();
-            console.log('✅ Найдена дата в новостях:', target.toISOString());
             return {
                 days: Math.floor(diff / 86400000),
                 hours: Math.floor((diff % 86400000) / 3600000),
@@ -55,119 +42,54 @@ async function getPoE2TimerData() {
                 seconds: Math.floor((diff % 60000) / 1000)
             };
         }
-        
-        // 2. Пробуем главную страницу
-        const homeRes = await fetch('https://pathofexile2.com/home');
-        const homeHtml = await homeRes.text();
-        
-        // Ищем "target" в JSON
-        const jsonMatch = homeHtml.match(/\{[^}]*"target"\s*:\s*"([^"]+)"[^}]*\}/);
-        if (jsonMatch) {
-            const target = new Date(jsonMatch[1]);
-            if (target > new Date()) {
-                const diff = target - Date.now();
-                console.log('✅ Найдена дата в JSON:', jsonMatch[1]);
-                return {
-                    days: Math.floor(diff / 86400000),
-                    hours: Math.floor((diff % 86400000) / 3600000),
-                    minutes: Math.floor((diff % 3600000) / 60000),
-                    seconds: Math.floor((diff % 60000) / 1000)
-                };
-            }
-        }
-        
-        // 3. Ищем SSR состояние
-        const ssrMatch = homeHtml.match(/__INITIAL_STATE__\s*=\s*({[\s\S]*?});/);
-        if (ssrMatch) {
-            try {
-                const data = JSON.parse(ssrMatch[1]);
-                const findTimer = (obj) => {
-                    if (!obj || typeof obj !== 'object') return null;
-                    if (obj.target && obj.days !== undefined) return obj;
-                    for (const key of Object.keys(obj)) {
-                        const found = findTimer(obj[key]);
-                        if (found) return found;
-                    }
-                    return null;
-                };
-                const timer = findTimer(data);
-                if (timer && timer.target) {
-                    const target = new Date(timer.target);
-                    const diff = target - Date.now();
-                    if (diff > 0) {
-                        console.log('✅ Найден таймер в состоянии');
-                        return {
-                            days: Math.floor(diff / 86400000),
-                            hours: Math.floor((diff % 86400000) / 3600000),
-                            minutes: Math.floor((diff % 3600000) / 60000),
-                            seconds: Math.floor((diff % 60000) / 1000)
-                        };
-                    }
-                }
-            } catch (e) {}
-        }
-        
-        // 4. Пробуем API
-        const apiRes = await fetch('https://pathofexile2.com/internal-api/content.json');
-        if (apiRes.ok) {
-            const data = await apiRes.json();
-            const findTimer = (obj) => {
-                if (!obj || typeof obj !== 'object') return null;
-                if (obj.target) return obj;
-                for (const key of Object.keys(obj)) {
-                    const found = findTimer(obj[key]);
-                    if (found) return found;
-                }
-                return null;
-            };
-            const timer = findTimer(data);
-            if (timer && timer.target) {
-                const target = new Date(timer.target);
-                const diff = target - Date.now();
-                if (diff > 0) {
-                    console.log('✅ Найден таймер в API');
-                    return {
-                        days: Math.floor(diff / 86400000),
-                        hours: Math.floor((diff % 86400000) / 3600000),
-                        minutes: Math.floor((diff % 3600000) / 60000),
-                        seconds: Math.floor((diff % 60000) / 1000)
-                    };
-                }
-            }
-        }
-        
-    } catch (e) {
-        console.error('❌ Ошибка:', e.message);
+        return { expired: true };
     }
-    
-    console.log('❌ Дата не найдена');
     return null;
 }
 
+async function setPoE2Date(userInput) {
+    const aiRes = await fetch(HELPER_WORKER, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ 
+            message: `Преврати это в точную дату ISO (2026-06-06T22:00:00+03:00).\n\n"${userInput}"\n\nТолько дата или ERROR.`,
+            currentAuthor: "timer", context: [] 
+        })
+    });
+    const reply = (await aiRes.json()).reply || '';
+    const isoMatch = reply.match(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[+-]\d{2}:\d{2}/);
+    if (isoMatch) {
+        const date = isoMatch[0];
+        if (!isNaN(new Date(date).getTime()) && new Date(date) > new Date()) {
+            settings.poe2LeagueDate = date;
+            return { success: true, date: new Date(date) };
+        }
+    }
+    const dateMatch = reply.match(/\d{4}-\d{2}-\d{2}/);
+    if (dateMatch) {
+        const date = dateMatch[0] + 'T22:00:00+03:00';
+        if (!isNaN(new Date(date).getTime()) && new Date(date) > new Date()) {
+            settings.poe2LeagueDate = date;
+            return { success: true, date: new Date(date) };
+        }
+    }
+    return { success: false };
+}
+
 function formatPoE2Message(data) {
-    if (!data) return '❌ Не удалось получить таймер';
-    if (data.expired) return '# 🎉 ЛИГА УЖЕ ЗАПУЩЕНА! ЗАХОДИ В ИГРУ!';
-    
+    if (!data) return '❌ Дата не установлена. Используй /poe2set';
+    if (data.expired) return '# 🎉 ЛИГА УЖЕ ЗАПУЩЕНА!';
     const totalSeconds = data.days * 86400 + data.hours * 3600 + data.minutes * 60 + data.seconds;
     const maxSeconds = 14 * 86400;
     const progress = Math.min(100, Math.max(0, Math.floor(((maxSeconds - totalSeconds) / maxSeconds) * 100)));
     const filled = Math.floor(progress / 5);
     const empty = 20 - filled;
-    
-    const now = new Date();
-    const targetDate = new Date(now.getTime() + totalSeconds * 1000);
-    
+    const targetDate = new Date(Date.now() + totalSeconds * 1000);
     const mskDate = targetDate.toLocaleString('ru-RU', { timeZone: 'Europe/Moscow', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' });
     const nskDate = targetDate.toLocaleString('ru-RU', { timeZone: 'Asia/Novosibirsk', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' });
-    
     return [
-        `# ⏳ ДО ЗАПУСКА ЛИГИ ⏳`,
-        `## 🏰 POE2 — ANCIENT LEAGUE 🏰`,
-        ``,
-        `## ${data.days}д : ${data.hours}ч : ${data.minutes}м : ${data.seconds}с`,
-        ``,
-        `${'🟢'.repeat(filled)}${'⚪'.repeat(empty)} **${progress}%**`,
-        ``,
+        `# ⏳ ДО ЗАПУСКА ЛИГИ ⏳`, `## 🏰 POE2 — ANCIENT LEAGUE 🏰`, ``,
+        `## ${data.days}д : ${data.hours}ч : ${data.minutes}м : ${data.seconds}с`, ``,
+        `${'🟢'.repeat(filled)}${'⚪'.repeat(empty)} **${progress}%**`, ``,
         `📅 ${mskDate.split(',')[0]}`,
         `   🇷🇺 МСК **${mskDate.split(',')[1]?.trim() || ''}**`,
         `   🇷🇺 НСК **${nskDate.split(',')[1]?.trim() || ''}**`,
@@ -177,13 +99,7 @@ function formatPoE2Message(data) {
 async function updatePoE2Timer() {
     if (!poe2TimerMessage || !poe2TimerChannel) return;
     const data = await getPoE2TimerData();
-    const content = formatPoE2Message(data);
-    try {
-        await poe2TimerMessage.edit({ content: content.substring(0, 2000) });
-        console.log('⏳ Таймер PoE2 обновлён');
-    } catch (e) {
-        console.error('Ошибка обновления таймера:', e.message);
-    }
+    try { await poe2TimerMessage.edit({ content: formatPoE2Message(data).substring(0, 2000) }); } catch (e) {}
 }
 
 async function startPoE2Timer(channel) {
@@ -191,19 +107,17 @@ async function startPoE2Timer(channel) {
     if (poe2TimerMessage) { try { await poe2TimerMessage.delete(); } catch (e) {} }
     poe2TimerChannel = channel;
     const data = await getPoE2TimerData();
-    const content = formatPoE2Message(data);
-    poe2TimerMessage = await channel.send({ content: content.substring(0, 2000) });
-    console.log('⏳ Таймер PoE2 создан');
+    poe2TimerMessage = await channel.send({ content: formatPoE2Message(data).substring(0, 2000) });
     poe2TimerInterval = setInterval(updatePoE2Timer, 30000);
 }
 
 async function stopPoE2Timer() {
     if (poe2TimerInterval) clearInterval(poe2TimerInterval);
     if (poe2TimerMessage) { try { await poe2TimerMessage.delete(); } catch (e) {} }
-    poe2TimerMessage = null;
-    poe2TimerChannel = null;
-    poe2TimerInterval = null;
+    poe2TimerMessage = null; poe2TimerChannel = null; poe2TimerInterval = null;
 }
+
+// ========== HEROES ==========
 const heroes = [
     { name: "Rehan", title: "Berserker | Anger", emoji: "🪓", id: "Anger" },
     { name: "Rehan", title: "Seething Silhouette", emoji: "👻", id: "Seething_Silhouette" },
@@ -472,6 +386,7 @@ const commands = [
     new SlashCommandBuilder().setName('wheel').setDescription('🎯 Колесо фортуны — выбор героя')
         .addIntegerOption(o => o.setName('count').setDescription('2-8').setRequired(false).setMinValue(2).setMaxValue(8)),
     new SlashCommandBuilder().setName('quiz').setDescription('🎉 Викторина с призом'),
+        new SlashCommandBuilder().setName('poe2set').setDescription('📅 Установить дату лиги PoE2').addStringOption(o => o.setName('date').setDescription('Дата (например: 29 мая 22:00 МСК)').setRequired(true)),
     new SlashCommandBuilder().setName('poe2').setDescription('⏳ Таймер до запуска лиги Path of Exile 2'),
     new SlashCommandBuilder().setName('poe2stop').setDescription('⏹ Остановить таймер PoE2'),
     new SlashCommandBuilder().setName('savesettings').setDescription('Сохранить настройки'),
@@ -521,7 +436,18 @@ client.on('interactionCreate', async (interaction) => {
         await interaction.editReply({ content: '✅ Таймер запущен!' });
         return;
     }
-    
+    if (commandName === 'poe2set') {
+    await interaction.deferReply({ flags: 64 });
+    const dateInput = interaction.options.getString('date');
+    const result = await setPoE2Date(dateInput);
+    if (result.success) {
+        const formatted = result.date.toLocaleString('ru-RU', { timeZone: 'Europe/Moscow', day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+        await interaction.editReply({ content: `✅ Дата лиги: **${formatted} МСК**\nИспользуй /poe2 для таймера!` });
+    } else {
+        await interaction.editReply({ content: '❌ Не удалось распознать дату. Попробуй: "29 мая 2026 22:00 МСК"' });
+    }
+    return;
+}
     if (commandName === 'poe2stop') {
         await interaction.deferReply({ flags: 64 });
         await stopPoE2Timer();
