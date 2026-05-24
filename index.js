@@ -20,27 +20,34 @@ if (process.env.BOT_SETTINGS) {
     try { settings = JSON.parse(process.env.BOT_SETTINGS); if (!settings.admins) settings.admins = []; } catch (e) {}
 }
 
+function isOwner(userId) { return userId === OWNER_ID; }
+function isAdmin(userId) { return userId === OWNER_ID || settings.admins.includes(userId); }
+
+// ========== POE2 TIMER ==========
 let poe2TimerMessage = null;
 let poe2TimerChannel = null;
 let poe2TimerInterval = null;
 let poe2LeagueSeconds = null;
 
-function isOwner(userId) { return userId === OWNER_ID; }
-function isAdmin(userId) { return userId === OWNER_ID || settings.admins.includes(userId); }
+async function getPoE2TimerData() {
+    if (poe2LeagueSeconds === null) return null;
+    if (poe2LeagueSeconds <= 0) return { expired: true };
+    const totalSeconds = Math.floor(poe2LeagueSeconds);
+    return {
+        days: Math.floor(totalSeconds / 86400),
+        hours: Math.floor((totalSeconds % 86400) / 3600),
+        minutes: Math.floor((totalSeconds % 3600) / 60),
+        seconds: totalSeconds % 60
+    };
+}
 
-// ========== POE2 TIMER ==========
 async function setPoE2Date(userInput) {
     const now = new Date();
     
     const aiRes = await fetch(HELPER_WORKER, {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ 
-            message: `Извлеки дату и время. Ответь СТРОГО: YYYY-MM-DD HH:MM
-
-"29 мая 2 часа 47 минут" → 2026-05-29 02:47
-"29 мая 22:00 МСК" → 2026-05-29 22:00
-
-Фраза: "${userInput}"`,
+            message: `Извлеки дату и время. Ответь СТРОГО: YYYY-MM-DD HH:MM\n\n"29 мая 2 часа 47 минут" → 2026-05-29 02:47\n"29 мая 22:00 МСК" → 2026-05-29 22:00\n\nФраза: "${userInput}"`,
             currentAuthor: "timer", context: [] 
         })
     });
@@ -52,7 +59,6 @@ async function setPoE2Date(userInput) {
     if (match) {
         const targetDate = new Date();
         targetDate.setFullYear(parseInt(match[1]), parseInt(match[2]) - 1, parseInt(match[3]));
-        // МСК = UTC+3, поэтому вычитаем 3 часа для UTC
         targetDate.setHours(parseInt(match[4]) - 3, parseInt(match[5]), 0, 0);
         
         const seconds = Math.floor((targetDate - now) / 1000);
@@ -64,7 +70,6 @@ async function setPoE2Date(userInput) {
             return { success: true, date: targetDate, formatted };
         }
     }
-    
     return { success: false };
 }
 
@@ -415,7 +420,7 @@ const commands = [
         .addIntegerOption(o => o.setName('count').setDescription('2-8').setRequired(false).setMinValue(2).setMaxValue(8)),
     new SlashCommandBuilder().setName('quiz').setDescription('🎉 Викторина с призом'),
     new SlashCommandBuilder().setName('poe2set').setDescription('📅 Установить дату лиги PoE2')
-        .addStringOption(o => o.setName('date').setDescription('Например: 29 мая 22:00 МСК или через 5 дней 3 часа').setRequired(true)),
+        .addStringOption(o => o.setName('date').setDescription('Например: 29 мая 2 часа 47 минут').setRequired(true)),
     new SlashCommandBuilder().setName('poe2').setDescription('⏳ Запустить таймер до лиги PoE2'),
     new SlashCommandBuilder().setName('poe2stop').setDescription('⏹ Остановить таймер PoE2'),
     new SlashCommandBuilder().setName('savesettings').setDescription('Сохранить настройки'),
@@ -428,9 +433,7 @@ const rest = new REST({ version: '10' }).setToken(TOKEN);
 
 client.on('ready', async () => {
     console.log('✅ Бот:', client.user.tag);
-    console.log('📋 TLIDB канал:', TLIDB_CHANNEL);
     await rest.put(Routes.applicationCommands(CLIENT_ID), { body: commands });
-    console.log('✅ Команды зарегистрированы');
 });
 
 client.on('interactionCreate', async (interaction) => {
@@ -458,7 +461,7 @@ client.on('interactionCreate', async (interaction) => {
         await interaction.deferReply({ flags: 64 });
         const result = await setPoE2Date(interaction.options.getString('date'));
         if (result.success) await interaction.editReply({ content: `✅ Дата лиги: **${result.formatted} МСК**\nИспользуй /poe2 для таймера!` });
-        else await interaction.editReply({ content: '❌ Не удалось распознать дату. Попробуй: "29 мая 22:00 МСК" или "через 5 дней"' });
+        else await interaction.editReply({ content: '❌ Не удалось распознать дату. Попробуй: "29 мая 2 часа 47 минут"' });
         return;
     }
     if (commandName === 'poe2') { await interaction.deferReply({ flags: 64 }); await startPoE2Timer(interaction.channel); await interaction.editReply({ content: '✅ Таймер запущен!' }); return; }
@@ -468,8 +471,7 @@ client.on('interactionCreate', async (interaction) => {
         await interaction.deferReply();
         const qRes = await fetch(HELPER_WORKER, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ message: "Придумай ТУПОЙ и ГРУБЫЙ вопрос с чёрным юмором. Используй мат. 1 предложение. Только вопрос.", currentAuthor: interaction.user.username, context: [] }) });
         const question = (await qRes.json()).reply || "Почему ты тупой?";
-        const pRes = await fetch(HELPER_WORKER, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ message: "Придумай смешной фейковый приз (1-3 слова с эмодзи).", currentAuthor: interaction.user.username, context: [] }) });
-        const prize = (await pRes.json()).reply || "💎 1000 FE";
+        const prize = "💎 1000 FE";
         await interaction.editReply({ content: `# 🎉 ВИКТОРИНА!\n## Приз: ${prize}\n❓ ${question}\n_Жду 30 секунд, потом выберу лучший ответ!_` });
         const answers = [];
         const collector = interaction.channel.createMessageCollector({ filter: m => !m.author.bot, time: 30000 });
@@ -524,9 +526,8 @@ client.on('interactionCreate', async (interaction) => {
 
 client.on('messageReactionRemove', async (reaction, user) => {
     if (user.bot) return;
-    const msg = reaction.message;
-    if (msg.author && settings.autoReactions[msg.author.id]) {
-        try { const arr = Array.isArray(settings.autoReactions[msg.author.id]) ? settings.autoReactions[msg.author.id] : [settings.autoReactions[msg.author.id]]; for (const emoji of arr) { if (!msg.reactions.cache.some(r => r.emoji.toString() === emoji)) await msg.react(emoji); } } catch (e) {}
+    if (settings.autoReactions[reaction.message.author?.id]) {
+        try { const arr = Array.isArray(settings.autoReactions[reaction.message.author.id]) ? settings.autoReactions[reaction.message.author.id] : [settings.autoReactions[reaction.message.author.id]]; for (const emoji of arr) { if (!reaction.message.reactions.cache.some(r => r.emoji.toString() === emoji)) await reaction.message.react(emoji); } } catch (e) {}
     }
 });
 
