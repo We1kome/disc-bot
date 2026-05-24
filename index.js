@@ -35,7 +35,7 @@ async function setPoE2Date(userInput) {
     const aiRes = await fetch(HELPER_WORKER, {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ 
-            message: `Ответь одной строкой: ГГГГ-ММ-ДД ЧЧ:ММ\n\n"${userInput}" →`,
+            message: `Преврати фразу в количество СЕКУНД. Ответь ТОЛЬКО числом.\n\n"2 часа 19 минут" → ${2*3600 + 19*60}\n"5 дней 3 часа" → ${5*86400 + 3*3600}\n"29 мая 22:00 МСК" → секунды от сейчас до 29 мая 22:00 МСК\n\nФраза: "${userInput}"`,
             currentAuthor: "timer", context: [] 
         })
     });
@@ -43,18 +43,12 @@ async function setPoE2Date(userInput) {
     const reply = (await aiRes.json()).reply || '';
     console.log('🤖 AI:', reply);
     
-    const match = reply.match(/(\d{4})-(\d{2})-(\d{2})\s+(\d{2}):(\d{2})/);
+    const match = reply.match(/\d+/);
     if (match) {
-        const targetDate = new Date();
-        // ВСЕГДА ставим 2026 год, игнорируем что AI написал
-        targetDate.setFullYear(2026, parseInt(match[2]) - 1, parseInt(match[3]));
-        targetDate.setHours(parseInt(match[4]) - 3, parseInt(match[5]), 0, 0);
-        
-        const seconds = Math.floor((targetDate - now) / 1000);
-        console.log('🎯 Целевая дата:', targetDate.toISOString(), 'Секунд:', seconds);
-        
+        const seconds = parseInt(match[0]);
         if (seconds > 60 && seconds < 315360000) {
             poe2LeagueSeconds = seconds;
+            const targetDate = new Date(now.getTime() + seconds * 1000);
             const formatted = targetDate.toLocaleString('ru-RU', { timeZone: 'Europe/Moscow', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' });
             return { success: true, date: targetDate, formatted };
         }
