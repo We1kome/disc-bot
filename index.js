@@ -78,37 +78,76 @@ async function setPoE2Date(userInput) {
 function formatPoE2Message(data) {
     if (!data) return '❌ Дата не установлена. Используй /poe2set';
     if (data.expired) return '# 🎉 ЛИГА УЖЕ ЗАПУЩЕНА!';
+    
     const totalSeconds = data.days * 86400 + data.hours * 3600 + data.minutes * 60 + data.seconds;
     const maxSeconds = 14 * 86400;
     const progress = Math.min(100, Math.max(0, Math.floor(((maxSeconds - totalSeconds) / maxSeconds) * 100)));
     const filled = Math.floor(progress / 5);
     const empty = 20 - filled;
+    
     const targetDate = new Date(Date.now() + totalSeconds * 1000);
-    const mskDate = targetDate.toLocaleString('ru-RU', { timeZone: 'Europe/Moscow', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' });
-    const nskDate = targetDate.toLocaleString('ru-RU', { timeZone: 'Asia/Novosibirsk', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' });
+    
+    // МСК
+    const mskTime = new Date(targetDate.toLocaleString('en-US', { timeZone: 'Europe/Moscow' }));
+    const mskHours = mskTime.getHours().toString().padStart(2, '0');
+    const mskMinutes = mskTime.getMinutes().toString().padStart(2, '0');
+    const mskDay = mskTime.getDate();
+    const mskMonth = mskTime.toLocaleString('ru-RU', { month: 'long' });
+    
+    // НСК
+    const nskTime = new Date(targetDate.toLocaleString('en-US', { timeZone: 'Asia/Novosibirsk' }));
+    const nskHours = nskTime.getHours().toString().padStart(2, '0');
+    const nskMinutes = nskTime.getMinutes().toString().padStart(2, '0');
+    const nskDay = nskTime.getDate();
+    const nskMonth = nskTime.toLocaleString('ru-RU', { month: 'long' });
+    
+    // Человеческое описание
+    let timeLeft = '';
+    if (data.days > 0) {
+        timeLeft = `(через ${data.days} ${getDayWord(data.days)}`;
+        if (data.hours > 0) timeLeft += ` и ${data.hours} ${getHourWord(data.hours)}`;
+        timeLeft += ')';
+    } else if (data.hours > 0) {
+        timeLeft = `(через ${data.hours} ${getHourWord(data.hours)}`;
+        if (data.minutes > 0) timeLeft += ` и ${data.minutes} ${getMinuteWord(data.minutes)}`;
+        timeLeft += ')';
+    } else if (data.minutes > 0) {
+        timeLeft = `(через ${data.minutes} ${getMinuteWord(data.minutes)})`;
+    } else {
+        timeLeft = `(через ${data.seconds} ${getSecondWord(data.seconds)})`;
+    }
+    
     return [
-        `# ⏳ ДО ЗАПУСКА ЛИГИ ⏳`, `## 🏰 POE2 — ANCIENT LEAGUE 🏰`, ``,
-        `## ${data.days}д : ${data.hours}ч : ${data.minutes}м : ${data.seconds}с`, ``,
-        `${'🟢'.repeat(filled)}${'⚪'.repeat(empty)} **${progress}%**`, ``,
-        `📅 ${mskDate.split(',')[0]}`,
-        `   🇷🇺 МСК **${mskDate.split(',')[1]?.trim() || ''}**`,
-        `   🇷🇺 НСК **${nskDate.split(',')[1]?.trim() || ''}**`,
+        `# ⏳ ДО ЗАПУСКА ЛИГИ ⏳`,
+        `## 🏰 POE2 — ANCIENT LEAGUE 🏰`,
+        ``,
+        `## ${data.days}д : ${data.hours}ч : ${data.minutes}м : ${data.seconds}с`,
+        ``,
+        `${'🟢'.repeat(filled)}${'⚪'.repeat(empty)} **${progress}%**`,
+        ``,
+        `📅 **${mskDay} ${mskMonth}**`,
+        `   🇷🇺 МСК **${mskHours}:${mskMinutes}** ${timeLeft}`,
+        `   🇷🇺 НСК **${nskHours}:${nskMinutes}** ${timeLeft}`,
     ].join('\n');
 }
+
+function getDayWord(d) { const n = d % 100; if (n >= 11 && n <= 14) return 'дней'; const r = d % 10; if (r === 1) return 'день'; if (r >= 2 && r <= 4) return 'дня'; return 'дней'; }
+function getHourWord(h) { const n = h % 100; if (n >= 11 && n <= 14) return 'часов'; const r = h % 10; if (r === 1) return 'час'; if (r >= 2 && r <= 4) return 'часа'; return 'часов'; }
+function getMinuteWord(m) { const n = m % 100; if (n >= 11 && n <= 14) return 'минут'; const r = m % 10; if (r === 1) return 'минуту'; if (r >= 2 && r <= 4) return 'минуты'; return 'минут'; }
+function getSecondWord(s) { const n = s % 100; if (n >= 11 && n <= 14) return 'секунд'; const r = s % 10; if (r === 1) return 'секунду'; if (r >= 2 && r <= 4) return 'секунды'; return 'секунд'; }
 
 async function updatePoE2Timer() {
     if (!poe2TimerMessage || !poe2TimerChannel) return;
     const data = await getPoE2TimerData();
     try { await poe2TimerMessage.edit({ content: formatPoE2Message(data).substring(0, 2000) }); } catch (e) {}
 }
-
 async function startPoE2Timer(channel) {
     if (poe2TimerInterval) clearInterval(poe2TimerInterval);
     if (poe2TimerMessage) { try { await poe2TimerMessage.delete(); } catch (e) {} }
     poe2TimerChannel = channel;
     const data = await getPoE2TimerData();
     poe2TimerMessage = await channel.send({ content: formatPoE2Message(data).substring(0, 2000) });
-    poe2TimerInterval = setInterval(updatePoE2Timer, 30000);
+    poe2TimerInterval = setInterval(updatePoE2Timer, 2000);
 }
 
 async function stopPoE2Timer() {
