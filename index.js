@@ -47,13 +47,10 @@ async function setPoE2Date(userInput) {
     const aiRes = await fetch(HELPER_WORKER, {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ 
-            message: `Извлеки дату и время. Ответь СТРОГО: YYYY-MM-DD HH:MM МСК
+            message: `Извлеки дату и время. Ответь СТРОГО: YYYY-MM-DD HH:MM
 
-ПРАВИЛА:
-"29 мая 2 часа 54 минуты 15 секунд" → 2026-05-29 02:54 МСК (это ВРЕМЯ 02:54)
-"29 мая через 2 часа" → 2026-05-29 02:00 МСК  
-"29 мая 22:00 МСК" → 2026-05-29 22:00 МСК
-"через 5 дней 3 часа" → ${new Date(now.getTime() + (5*86400 + 3*3600) * 1000).toISOString().split('T')[0]} ${new Date(now.getTime() + (5*86400 + 3*3600) * 1000).toLocaleString('ru-RU', {hour: '2-digit', minute: '2-digit'})} МСК
+"29 мая 2 часа 52 минуты" → 2026-05-29 02:52
+"29 мая 22:00" → 2026-05-29 22:00
 
 Фраза: "${userInput}"`,
             currentAuthor: "timer", context: [] 
@@ -63,7 +60,8 @@ async function setPoE2Date(userInput) {
     const reply = (await aiRes.json()).reply || '';
     console.log('🤖 AI:', reply);
     
-    const match = reply.match(/(\d{4})-(\d{2})-(\d{2})\s+(\d{2}):(\d{2})/);
+    // Принимаем и "02:52" и "0252"
+    const match = reply.match(/(\d{4})-(\d{2})-(\d{2})\s+(\d{2}):?(\d{2})/);
     if (match) {
         const targetDate = new Date(parseInt(match[1]), parseInt(match[2]) - 1, parseInt(match[3]), parseInt(match[4]), parseInt(match[5]), 0);
         const seconds = Math.floor((targetDate - now) / 1000);
