@@ -31,100 +31,42 @@ function isAdmin(userId) { return userId === OWNER_ID || settings.admins.include
 
 // ========== POE2 TIMER ==========
 async function getPoE2TimerData() {
-    console.log('⏳ Запрашиваю таймер PoE2...');
+    console.log('⏳ Ищу дату лиги PoE2...');
     
-    // Пробуем API
     try {
-        console.log('🔗 Пробую API...');
-        const apiResponse = await fetch('https://pathofexile2.com/internal-api/content.json');
-        console.log('📡 Статус API:', apiResponse.status);
+        // 1. Пробуем страницу /news
+        const newsRes = await fetch('https://pathofexile2.com/news');
+        const newsHtml = await newsRes.text();
         
-        if (apiResponse.ok) {
-            const data = await apiResponse.json();
-            console.log('📦 Ключи API:', Object.keys(data).join(', '));
-            
-            // Проверяем разные возможные структуры
-            if (data.timer) {
-                console.log('✅ Найден data.timer');
-                const target = new Date(data.timer.target).getTime();
-                const now = Date.now();
-                const diff = target - now;
-                if (diff > 0) {
-                    return {
-                        days: Math.floor(diff / 86400000),
-                        hours: Math.floor((diff % 86400000) / 3600000),
-                        minutes: Math.floor((diff % 3600000) / 60000),
-                        seconds: Math.floor((diff % 60000) / 1000)
-                    };
-                }
-                return { expired: true };
-            }
-            
-            if (data.sections) {
-                console.log('🔍 Ищу в sections...');
-                for (const section of data.sections) {
-                    if (section.timer) {
-                        console.log('✅ Найден section.timer');
-                        const target = new Date(section.timer.target).getTime();
-                        const now = Date.now();
-                        const diff = target - now;
-                        if (diff > 0) {
-                            return {
-                                days: Math.floor(diff / 86400000),
-                                hours: Math.floor((diff % 86400000) / 3600000),
-                                minutes: Math.floor((diff % 3600000) / 60000),
-                                seconds: Math.floor((diff % 60000) / 1000)
-                            };
-                        }
-                        return { expired: true };
-                    }
-                }
-            }
-            
-            // Выводим весь JSON для отладки
-            console.log('📄 Контент API (первые 500 символов):', JSON.stringify(data).substring(0, 500));
-        }
-    } catch (e) {
-        console.error('❌ Ошибка API:', e.message);
-    }
-    
-    // Парсим HTML
-    try {
-        console.log('🔗 Пробую HTML...');
-        const response = await fetch('https://pathofexile2.com/home');
-        const html = await response.text();
+        const allDates = newsHtml.match(/\d{4}-\d{2}-\d{2}/g) || [];
+        const futureDates = allDates
+            .map(d => new Date(d + 'T22:00:00+03:00'))
+            .filter(d => d > new Date())
+            .sort((a, b) => a - b);
         
-        // Ищем countdown
-        const daysMatch = html.match(/poe2-countdown__ticker--days">(\d+)</);
-        const hoursMatch = html.match(/poe2-countdown__ticker--hours">(\d+)</);
-        const minutesMatch = html.match(/poe2-countdown__ticker--minutes">(\d+)</);
-        const secondsMatch = html.match(/poe2-countdown__ticker--seconds">(\d+)</);
-        
-        console.log('🔍 HTML таймер:', { 
-            days: daysMatch?.[1], 
-            hours: hoursMatch?.[1], 
-            minutes: minutesMatch?.[1], 
-            seconds: secondsMatch?.[1] 
-        });
-        
-        if (daysMatch && hoursMatch && minutesMatch && secondsMatch) {
-            console.log('✅ Найден HTML таймер');
+        if (futureDates.length > 0) {
+            const target = futureDates[0];
+            const diff = target - Date.now();
+            console.log('✅ Найдена дата в новостях:', target.toISOString());
             return {
-                days: parseInt(daysMatch[1]),
-                hours: parseInt(hoursMatch[1]),
-                minutes: parseInt(minutesMatch[1]),
-                seconds: parseInt(secondsMatch[1])
+                days: Math.floor(diff / 86400000),
+                hours: Math.floor((diff % 86400000) / 3600000),
+                minutes: Math.floor((diff % 3600000) / 60000),
+                seconds: Math.floor((diff % 60000) / 1000)
             };
         }
         
-        // Ищем target в JSON внутри HTML
-        const targetMatch = html.match(/"target":"([^"]+)"/);
-        if (targetMatch) {
-            console.log('✅ Найден target в HTML:', targetMatch[1]);
-            const target = new Date(targetMatch[1]).getTime();
-            const now = Date.now();
-            const diff = target - now;
-            if (diff > 0) {
+        // 2. Пробуем главную страницу
+        const homeRes = await fetch('https://pathofexile2.com/home');
+        const homeHtml = await homeRes.text();
+        
+        // Ищем "target" в JSON
+        const jsonMatch = homeHtml.match(/\{[^}]*"target"\s*:\s*"([^"]+)"[^}]*\}/);
+        if (jsonMatch) {
+            const target = new Date(jsonMatch[1]);
+            if (target > new Date()) {
+                const diff = target - Date.now();
+                console.log('✅ Найдена дата в JSON:', jsonMatch[1]);
                 return {
                     days: Math.floor(diff / 86400000),
                     hours: Math.floor((diff % 86400000) / 3600000),
@@ -132,18 +74,73 @@ async function getPoE2TimerData() {
                     seconds: Math.floor((diff % 60000) / 1000)
                 };
             }
-            return { expired: true };
         }
         
-        // Логируем кусок HTML где должен быть таймер
-        const timerSection = html.match(/poe2-countdown[^<]*<[\s\S]{0,500}/);
-        console.log('🔍 Секция таймера в HTML:', timerSection?.[0] || 'НЕ НАЙДЕНА');
+        // 3. Ищем SSR состояние
+        const ssrMatch = homeHtml.match(/__INITIAL_STATE__\s*=\s*({[\s\S]*?});/);
+        if (ssrMatch) {
+            try {
+                const data = JSON.parse(ssrMatch[1]);
+                const findTimer = (obj) => {
+                    if (!obj || typeof obj !== 'object') return null;
+                    if (obj.target && obj.days !== undefined) return obj;
+                    for (const key of Object.keys(obj)) {
+                        const found = findTimer(obj[key]);
+                        if (found) return found;
+                    }
+                    return null;
+                };
+                const timer = findTimer(data);
+                if (timer && timer.target) {
+                    const target = new Date(timer.target);
+                    const diff = target - Date.now();
+                    if (diff > 0) {
+                        console.log('✅ Найден таймер в состоянии');
+                        return {
+                            days: Math.floor(diff / 86400000),
+                            hours: Math.floor((diff % 86400000) / 3600000),
+                            minutes: Math.floor((diff % 3600000) / 60000),
+                            seconds: Math.floor((diff % 60000) / 1000)
+                        };
+                    }
+                }
+            } catch (e) {}
+        }
+        
+        // 4. Пробуем API
+        const apiRes = await fetch('https://pathofexile2.com/internal-api/content.json');
+        if (apiRes.ok) {
+            const data = await apiRes.json();
+            const findTimer = (obj) => {
+                if (!obj || typeof obj !== 'object') return null;
+                if (obj.target) return obj;
+                for (const key of Object.keys(obj)) {
+                    const found = findTimer(obj[key]);
+                    if (found) return found;
+                }
+                return null;
+            };
+            const timer = findTimer(data);
+            if (timer && timer.target) {
+                const target = new Date(timer.target);
+                const diff = target - Date.now();
+                if (diff > 0) {
+                    console.log('✅ Найден таймер в API');
+                    return {
+                        days: Math.floor(diff / 86400000),
+                        hours: Math.floor((diff % 86400000) / 3600000),
+                        minutes: Math.floor((diff % 3600000) / 60000),
+                        seconds: Math.floor((diff % 60000) / 1000)
+                    };
+                }
+            }
+        }
         
     } catch (e) {
-        console.error('❌ Ошибка HTML:', e.message);
+        console.error('❌ Ошибка:', e.message);
     }
     
-    console.log('❌ Таймер не найден');
+    console.log('❌ Дата не найдена');
     return null;
 }
 
@@ -152,12 +149,11 @@ function formatPoE2Message(data) {
     if (data.expired) return '# 🎉 ЛИГА УЖЕ ЗАПУЩЕНА! ЗАХОДИ В ИГРУ!';
     
     const totalSeconds = data.days * 86400 + data.hours * 3600 + data.minutes * 60 + data.seconds;
-    const maxSeconds = 14 * 86400; // Примерно 2 недели
+    const maxSeconds = 14 * 86400;
     const progress = Math.min(100, Math.max(0, Math.floor(((maxSeconds - totalSeconds) / maxSeconds) * 100)));
     const filled = Math.floor(progress / 5);
     const empty = 20 - filled;
     
-    // Время в Новосибирске (MSK+4)
     const now = new Date();
     const targetDate = new Date(now.getTime() + totalSeconds * 1000);
     
@@ -180,10 +176,8 @@ function formatPoE2Message(data) {
 
 async function updatePoE2Timer() {
     if (!poe2TimerMessage || !poe2TimerChannel) return;
-    
     const data = await getPoE2TimerData();
     const content = formatPoE2Message(data);
-    
     try {
         await poe2TimerMessage.edit({ content: content.substring(0, 2000) });
         console.log('⏳ Таймер PoE2 обновлён');
@@ -193,35 +187,23 @@ async function updatePoE2Timer() {
 }
 
 async function startPoE2Timer(channel) {
-    // Останавливаем старый таймер если есть
     if (poe2TimerInterval) clearInterval(poe2TimerInterval);
-    if (poe2TimerMessage) {
-        try { await poe2TimerMessage.delete(); } catch (e) {}
-    }
-    
+    if (poe2TimerMessage) { try { await poe2TimerMessage.delete(); } catch (e) {} }
     poe2TimerChannel = channel;
-    
     const data = await getPoE2TimerData();
     const content = formatPoE2Message(data);
-    
     poe2TimerMessage = await channel.send({ content: content.substring(0, 2000) });
     console.log('⏳ Таймер PoE2 создан');
-    
-    // Обновляем каждые 30 секунд
     poe2TimerInterval = setInterval(updatePoE2Timer, 30000);
 }
 
 async function stopPoE2Timer() {
     if (poe2TimerInterval) clearInterval(poe2TimerInterval);
-    if (poe2TimerMessage) {
-        try { await poe2TimerMessage.delete(); } catch (e) {}
-    }
+    if (poe2TimerMessage) { try { await poe2TimerMessage.delete(); } catch (e) {} }
     poe2TimerMessage = null;
     poe2TimerChannel = null;
     poe2TimerInterval = null;
 }
-
-// ========== HEROES ==========
 const heroes = [
     { name: "Rehan", title: "Berserker | Anger", emoji: "🪓", id: "Anger" },
     { name: "Rehan", title: "Seething Silhouette", emoji: "👻", id: "Seething_Silhouette" },
