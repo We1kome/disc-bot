@@ -9,7 +9,6 @@ const HELPER_WORKER = process.env.HELPER_WORKER;
 const ROAST_CHANNEL = process.env.ROAST_CHANNEL;
 const HELPER_CHANNEL = process.env.HELPER_CHANNEL;
 const TLIDB_CHANNEL = process.env.TLIDB_CHANNEL || "1500881477339058227";
-const POE2_TIMER_CHANNEL = process.env.POE2_TIMER_CHANNEL || ROAST_CHANNEL; // Канал для таймера
 
 if (!TOKEN || !CLIENT_ID || !OWNER_ID || !ROAST_WORKER || !ROAST_WORKER_BACKUP || !HELPER_WORKER || !ROAST_CHANNEL || !HELPER_CHANNEL) {
     console.error('Нет всех переменных');
@@ -25,50 +24,33 @@ if (process.env.BOT_SETTINGS) {
 let poe2TimerMessage = null;
 let poe2TimerChannel = null;
 let poe2TimerInterval = null;
+let poe2LeagueSeconds = null;
 
 function isOwner(userId) { return userId === OWNER_ID; }
 function isAdmin(userId) { return userId === OWNER_ID || settings.admins.includes(userId); }
 
 // ========== POE2 TIMER ==========
 async function getPoE2TimerData() {
-    if (settings.poe2LeagueDate) {
-        const target = new Date(settings.poe2LeagueDate);
-        if (target > new Date()) {
-            const diff = target - Date.now();
-            return {
-                days: Math.floor(diff / 86400000),
-                hours: Math.floor((diff % 86400000) / 3600000),
-                minutes: Math.floor((diff % 3600000) / 60000),
-                seconds: Math.floor((diff % 60000) / 1000)
-            };
-        }
-        return { expired: true };
-    }
-    return null;
+    if (poe2LeagueSeconds === null) return null;
+    if (poe2LeagueSeconds <= 0) return { expired: true };
+    const totalSeconds = Math.floor(poe2LeagueSeconds);
+    return {
+        days: Math.floor(totalSeconds / 86400),
+        hours: Math.floor((totalSeconds % 86400) / 3600),
+        minutes: Math.floor((totalSeconds % 3600) / 60),
+        seconds: totalSeconds % 60
+    };
 }
 
 async function setPoE2Date(userInput) {
-    const currentDate = settings.poe2LeagueDate || 'не установлена';
+    const now = new Date();
+    const currentTime = now.toISOString();
+    const oldSeconds = poe2LeagueSeconds;
     
     const aiRes = await fetch(HELPER_WORKER, {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ 
-            message: `Ты — система точного управления таймером лиги Path of Exile 2.
-
-Текущая дата лиги: ${currentDate}
-Текущее время сейчас: ${new Date().toISOString()}
-
-Пользователь написал: "${userInput}"
-
-Твоя задача — вычислить НОВУЮ дату лиги на основе запроса пользователя.
-
-ПРАВИЛА:
-- Понимай ЛЮБЫЕ формулировки: "прибавь час", "отними 10 секунд", "поставь на 29 мая 22:00 МСК", "сдвинь на 2 дня вперёд", "завтра в 20:00", "через неделю", "14 июня 18:00"
-- Если текущая дата "не установлена" — используй текущий год (2026)
-- МСК = UTC+3
-- Всегда возвращай дату строго в формате ISO: 2026-05-29T22:00:00+03:00
-
-Ответь ТОЛЬКО ISO датой, ничего больше. Если совсем не понял — ответь "ERROR".`,
+            message: `Сейчас: ${currentTime} (МСК: ${now.toLocaleString('ru-RU', {timeZone: 'Europe/Moscow'})})\n\nПользователь написал: "${userInput}"\n\nВычисли сколько СЕКУНД осталось до лиги PoE2.\n\nПРИМЕРЫ:\n"29 мая 22:00 МСК" → посчитай разницу в секундах между сейчас и 2026-05-29T22:00:00+03:00\n"через 5 дней 3 часа" → 5*86400 + 3*3600 = ${5*86400 + 3*3600}\n"прибавь 1 час" → ${oldSeconds || 0} + 3600\n"отними 10 секунд" → ${oldSeconds || 0} - 10\n\nОтветь ТОЛЬКО одним целым числом (количество секунд).`,
             currentAuthor: "timer", context: [] 
         })
     });
@@ -76,33 +58,21 @@ async function setPoE2Date(userInput) {
     const reply = (await aiRes.json()).reply || '';
     console.log('🤖 AI:', reply);
     
-    // ISO дата
-    const isoMatch = reply.match(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[+-]\d{2}:\d{2}/);
-    if (isoMatch) {
-        const date = isoMatch[0];
-        const parsed = new Date(date);
-        if (!isNaN(parsed.getTime()) && parsed > new Date()) {
-            settings.poe2LeagueDate = date;
-            return { success: true, date: parsed };
+    const secondsMatch = reply.match(/-?\d+/);
+    if (secondsMatch) {
+        const seconds = parseInt(secondsMatch[0]);
+        if (seconds > 0 && seconds < 315360000) {
+            poe2LeagueSeconds = seconds;
+            if (poe2TimerChannel) startPoE2Timer(poe2TimerChannel);
+            return { success: true, date: new Date(Date.now() + seconds * 1000) };
         }
     }
-    
-    // Просто дата
-    const dateMatch = reply.match(/\d{4}-\d{2}-\d{2}/);
-    if (dateMatch) {
-        const date = dateMatch[0] + 'T22:00:00+03:00';
-        const parsed = new Date(date);
-        if (!isNaN(parsed.getTime()) && parsed > new Date()) {
-            settings.poe2LeagueDate = date;
-            return { success: true, date: parsed };
-        }
-    }
-    
     return { success: false };
 }
 
 function formatPoE2Message(data) {
-    if (!data) return '❌ Дата не установлена. Используй /poe2set';
+    if (poe2LeagueSeconds === null) return '❌ Дата не установлена. Используй /poe2set';
+    if (!data) return '⏳ Загрузка...';
     if (data.expired) return '# 🎉 ЛИГА УЖЕ ЗАПУЩЕНА!';
     
     const totalSeconds = data.days * 86400 + data.hours * 3600 + data.minutes * 60 + data.seconds;
@@ -110,37 +80,30 @@ function formatPoE2Message(data) {
     const progress = Math.min(100, Math.max(0, Math.floor(((maxSeconds - totalSeconds) / maxSeconds) * 100)));
     const filled = Math.floor(progress / 5);
     const empty = 20 - filled;
+    const targetDate = new Date(Date.now() + totalSeconds * 1000);
+    const months = ['января','февраля','марта','апреля','мая','июня','июля','августа','сентября','октября','ноября','декабря'];
     
-const targetDate = new Date(settings.poe2LeagueDate);
+    const mskDate = new Date(targetDate.toLocaleString('en-US', { timeZone: 'Europe/Moscow' }));
+    const mskHours = mskDate.getHours().toString().padStart(2, '0');
+    const mskMinutes = mskDate.getMinutes().toString().padStart(2, '0');
+    const mskDay = mskDate.getDate();
+    const mskMonth = months[mskDate.getMonth()];
     
-    // МСК
-    const mskTime = new Date(targetDate.toLocaleString('en-US', { timeZone: 'Europe/Moscow' }));
-    const mskHours = mskTime.getHours().toString().padStart(2, '0');
-    const mskMinutes = mskTime.getMinutes().toString().padStart(2, '0');
-    const mskDay = mskTime.getDate();
-    const mskMonth = mskTime.toLocaleString('ru-RU', { month: 'long' });
+    const nskDate = new Date(targetDate.toLocaleString('en-US', { timeZone: 'Asia/Novosibirsk' }));
+    const nskHours = nskDate.getHours().toString().padStart(2, '0');
+    const nskMinutes = nskDate.getMinutes().toString().padStart(2, '0');
     
-    // НСК
-    const nskTime = new Date(targetDate.toLocaleString('en-US', { timeZone: 'Asia/Novosibirsk' }));
-    const nskHours = nskTime.getHours().toString().padStart(2, '0');
-    const nskMinutes = nskTime.getMinutes().toString().padStart(2, '0');
-    const nskDay = nskTime.getDate();
-    const nskMonth = nskTime.toLocaleString('ru-RU', { month: 'long' });
-    
-    // Человеческое описание
     let timeLeft = '';
     if (data.days > 0) {
-        timeLeft = `(через ${data.days} ${getDayWord(data.days)}`;
+        timeLeft = `через ${data.days} ${getDayWord(data.days)}`;
         if (data.hours > 0) timeLeft += ` и ${data.hours} ${getHourWord(data.hours)}`;
-        timeLeft += ')';
     } else if (data.hours > 0) {
-        timeLeft = `(через ${data.hours} ${getHourWord(data.hours)}`;
+        timeLeft = `через ${data.hours} ${getHourWord(data.hours)}`;
         if (data.minutes > 0) timeLeft += ` и ${data.minutes} ${getMinuteWord(data.minutes)}`;
-        timeLeft += ')';
     } else if (data.minutes > 0) {
-        timeLeft = `(через ${data.minutes} ${getMinuteWord(data.minutes)})`;
+        timeLeft = `через ${data.minutes} ${getMinuteWord(data.minutes)}`;
     } else {
-        timeLeft = `(через ${data.seconds} ${getSecondWord(data.seconds)})`;
+        timeLeft = `через ${data.seconds} ${getSecondWord(data.seconds)}`;
     }
     
     return [
@@ -152,8 +115,8 @@ const targetDate = new Date(settings.poe2LeagueDate);
         `${'🟢'.repeat(filled)}${'⚪'.repeat(empty)} **${progress}%**`,
         ``,
         `📅 **${mskDay} ${mskMonth}**`,
-        `   🇷🇺 МСК **${mskHours}:${mskMinutes}** ${timeLeft}`,
-        `   🇷🇺 НСК **${nskHours}:${nskMinutes}** ${timeLeft}`,
+        `   🇷🇺 МСК **${mskHours}:${mskMinutes}** (${timeLeft})`,
+        `   🇷🇺 НСК **${nskHours}:${nskMinutes}** (${timeLeft})`,
     ].join('\n');
 }
 
@@ -167,6 +130,7 @@ async function updatePoE2Timer() {
     const data = await getPoE2TimerData();
     try { await poe2TimerMessage.edit({ content: formatPoE2Message(data).substring(0, 2000) }); } catch (e) {}
 }
+
 async function startPoE2Timer(channel) {
     if (poe2TimerInterval) clearInterval(poe2TimerInterval);
     if (poe2TimerMessage) { try { await poe2TimerMessage.delete(); } catch (e) {} }
@@ -451,8 +415,9 @@ const commands = [
     new SlashCommandBuilder().setName('wheel').setDescription('🎯 Колесо фортуны — выбор героя')
         .addIntegerOption(o => o.setName('count').setDescription('2-8').setRequired(false).setMinValue(2).setMaxValue(8)),
     new SlashCommandBuilder().setName('quiz').setDescription('🎉 Викторина с призом'),
-        new SlashCommandBuilder().setName('poe2set').setDescription('📅 Установить дату лиги PoE2').addStringOption(o => o.setName('date').setDescription('Дата (например: 29 мая 22:00 МСК)').setRequired(true)),
-    new SlashCommandBuilder().setName('poe2').setDescription('⏳ Таймер до запуска лиги Path of Exile 2'),
+    new SlashCommandBuilder().setName('poe2set').setDescription('📅 Установить дату лиги PoE2')
+        .addStringOption(o => o.setName('date').setDescription('Дата (например: 29 мая 22:00 МСК или через 5 дней)').setRequired(true)),
+    new SlashCommandBuilder().setName('poe2').setDescription('⏳ Запустить таймер до лиги PoE2'),
     new SlashCommandBuilder().setName('poe2stop').setDescription('⏹ Остановить таймер PoE2'),
     new SlashCommandBuilder().setName('savesettings').setDescription('Сохранить настройки'),
     new SlashCommandBuilder().setName('settings').setDescription('Показать настройки'),
@@ -494,25 +459,27 @@ client.on('interactionCreate', async (interaction) => {
         return;
     }
     
-    // poe2 и poe2stop доступны всем
+    // poe2 команды доступны всем
+    if (commandName === 'poe2set') {
+        await interaction.deferReply({ flags: 64 });
+        const dateInput = interaction.options.getString('date');
+        const result = await setPoE2Date(dateInput);
+        if (result.success) {
+            const formatted = result.date.toLocaleString('ru-RU', { timeZone: 'Europe/Moscow', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' });
+            await interaction.editReply({ content: `✅ Дата лиги: **${formatted} МСК**\nИспользуй /poe2 для таймера!` });
+        } else {
+            await interaction.editReply({ content: '❌ Не удалось распознать дату. Попробуй: "29 мая 22:00 МСК" или "через 5 дней"' });
+        }
+        return;
+    }
+    
     if (commandName === 'poe2') {
         await interaction.deferReply({ flags: 64 });
         await startPoE2Timer(interaction.channel);
         await interaction.editReply({ content: '✅ Таймер запущен!' });
         return;
     }
-    if (commandName === 'poe2set') {
-    await interaction.deferReply({ flags: 64 });
-    const dateInput = interaction.options.getString('date');
-    const result = await setPoE2Date(dateInput);
-    if (result.success) {
-        const formatted = result.date.toLocaleString('ru-RU', { timeZone: 'Europe/Moscow', day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' });
-        await interaction.editReply({ content: `✅ Дата лиги: **${formatted} МСК**\nИспользуй /poe2 для таймера!` });
-    } else {
-        await interaction.editReply({ content: '❌ Не удалось распознать дату. Попробуй: "29 мая 2026 22:00 МСК"' });
-    }
-    return;
-}
+    
     if (commandName === 'poe2stop') {
         await interaction.deferReply({ flags: 64 });
         await stopPoE2Timer();
@@ -570,7 +537,7 @@ client.on('interactionCreate', async (interaction) => {
         return;
     }
     
-    if (!isAdmin(interaction.user.id)) return interaction.reply({ content: '🚫 Нет прав! Используй /wheel /quiz /poe2', flags: 64 });
+    if (!isAdmin(interaction.user.id)) return interaction.reply({ content: '🚫 Нет прав! Используй /wheel /quiz /poe2 /poe2set /poe2stop', flags: 64 });
     
     if (commandName === 'cleanup') { await interaction.deferReply({ flags: 64 }); await rest.put(Routes.applicationCommands(CLIENT_ID), { body: [] }); await new Promise(r => setTimeout(r, 2000)); await rest.put(Routes.applicationCommands(CLIENT_ID), { body: commands }); return interaction.editReply({ content: '✅ Готово' }); }
     await interaction.deferReply({ flags: 64 });
@@ -581,7 +548,7 @@ client.on('interactionCreate', async (interaction) => {
     if (commandName === 'smilelist') { const entries = Object.entries(settings.autoReactions); if (!entries.length) return interaction.editReply({ content: '📋 Пусто' }); return interaction.editReply({ content: entries.map(([id, e]) => `${Array.isArray(e)?e.join(' '):e} → <@${id}>`).join('\n') }); }
     if (commandName === 'savesettings') return interaction.editReply({ content: `BOT_SETTINGS=\n${JSON.stringify(settings)}` });
     if (commandName === 'settings') return interaction.editReply({ content: `Вкл: ${settings.enabled}\nШанс: ${settings.roastChance}%\nРеакций: ${Object.keys(settings.autoReactions).length}\nАдминов: ${settings.admins.length}` });
-    if (commandName === 'help') return interaction.editReply({ content: '**Всем:** /wheel /quiz /poe2 /poe2stop\n**Админам:** /toggle /roastchance /loversmile /stopsmile /smilelist /savesettings /settings /cleanup\n**Владельцу:** /loveadmin' });
+    if (commandName === 'help') return interaction.editReply({ content: '**Всем:** /wheel /quiz /poe2 /poe2set /poe2stop\n**Админам:** /toggle /roastchance /loversmile /stopsmile /smilelist /savesettings /settings /cleanup\n**Владельцу:** /loveadmin' });
 });
 
 client.on('messageReactionRemove', async (reaction, user) => {
