@@ -29,34 +29,18 @@ function isOwner(userId) { return userId === OWNER_ID; }
 function isAdmin(userId) { return userId === OWNER_ID || settings.admins.includes(userId); }
 
 // ========== POE2 TIMER ==========
-async function getPoE2TimerData() {
-    if (poe2LeagueSeconds === null) return null;
-    if (poe2LeagueSeconds <= 0) return { expired: true };
-    const totalSeconds = Math.floor(poe2LeagueSeconds);
-    return {
-        days: Math.floor(totalSeconds / 86400),
-        hours: Math.floor((totalSeconds % 86400) / 3600),
-        minutes: Math.floor((totalSeconds % 3600) / 60),
-        seconds: totalSeconds % 60
-    };
-}
-
 async function setPoE2Date(userInput) {
     const now = new Date();
     
     const aiRes = await fetch(HELPER_WORKER, {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ 
-            message: `Извлеки ДАТУ и ВРЕМЯ СУТОК. Не прибавляй к текущему времени.
+            message: `Извлеки дату и время. Ответь СТРОГО: YYYY-MM-DD HH:MM
 
-"29 мая 2 часа 50 минут 15 секунд" означает 29 мая в 02:50 ночи.
-Ответь: 2026-05-29 02:50
+"29 мая 2 часа 50 минут" → 2026-05-29 02:50
+"29 мая 22:00 МСК" → 2026-05-29 22:00
 
-"29 мая 22:00 МСК" означает 29 мая в 22:00 вечера.
-Ответь: 2026-05-29 22:00
-
-Фраза: "${userInput}"
-Ответь СТРОГО: YYYY-MM-DD HH:MM`,
+Фраза: "${userInput}"`,
             currentAuthor: "timer", context: [] 
         })
     });
@@ -66,7 +50,8 @@ async function setPoE2Date(userInput) {
     
     const match = reply.match(/(\d{4})-(\d{2})-(\d{2})\s+(\d{2}):?(\d{2})/);
     if (match) {
-        const targetDate = new Date(parseInt(match[1]), parseInt(match[2]) - 1, parseInt(match[3]), parseInt(match[4]), parseInt(match[5]), 0);
+        // ВАЖНО: создаём дату с указанием МСК (UTC+3)
+        const targetDate = new Date(`${match[1]}-${match[2]}-${match[3]}T${match[4]}:${match[5]}:00+03:00`);
         const seconds = Math.floor((targetDate - now) / 1000);
         
         if (seconds > 60 && seconds < 315360000) {
