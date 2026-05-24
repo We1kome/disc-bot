@@ -9,6 +9,7 @@ const HELPER_WORKER = process.env.HELPER_WORKER;
 const ROAST_CHANNEL = process.env.ROAST_CHANNEL;
 const HELPER_CHANNEL = process.env.HELPER_CHANNEL;
 const TLIDB_CHANNEL = process.env.TLIDB_CHANNEL || "1500881477339058227";
+const POE2_TIMER_CHANNEL = process.env.POE2_TIMER_CHANNEL || ROAST_CHANNEL; // Канал для таймера
 
 if (!TOKEN || !CLIENT_ID || !OWNER_ID || !ROAST_WORKER || !ROAST_WORKER_BACKUP || !HELPER_WORKER || !ROAST_CHANNEL || !HELPER_CHANNEL) {
     console.error('Нет всех переменных');
@@ -20,9 +21,117 @@ if (process.env.BOT_SETTINGS) {
     try { settings = JSON.parse(process.env.BOT_SETTINGS); if (!settings.admins) settings.admins = []; } catch (e) {}
 }
 
+// Хранилище таймера PoE2
+let poe2TimerMessage = null;
+let poe2TimerChannel = null;
+let poe2TimerInterval = null;
+
 function isOwner(userId) { return userId === OWNER_ID; }
 function isAdmin(userId) { return userId === OWNER_ID || settings.admins.includes(userId); }
 
+// ========== POE2 TIMER ==========
+async function getPoE2TimerData() {
+    try {
+        const response = await fetch('https://pathofexile2.com/home');
+        const html = await response.text();
+        
+        const daysMatch = html.match(/poe2-countdown__ticker--days">(\d+)</);
+        const hoursMatch = html.match(/poe2-countdown__ticker--hours">(\d+)</);
+        const minutesMatch = html.match(/poe2-countdown__ticker--minutes">(\d+)</);
+        const secondsMatch = html.match(/poe2-countdown__ticker--seconds">(\d+)</);
+        
+        if (daysMatch && hoursMatch && minutesMatch && secondsMatch) {
+            return {
+                days: parseInt(daysMatch[1]),
+                hours: parseInt(hoursMatch[1]),
+                minutes: parseInt(minutesMatch[1]),
+                seconds: parseInt(secondsMatch[1])
+            };
+        }
+        
+        // Если таймер не найден — лига уже запущена
+        return { expired: true };
+    } catch (e) {
+        console.error('Ошибка таймера PoE2:', e.message);
+        return null;
+    }
+}
+
+function formatPoE2Message(data) {
+    if (!data) return '❌ Не удалось получить таймер';
+    if (data.expired) return '# 🎉 ЛИГА УЖЕ ЗАПУЩЕНА! ЗАХОДИ В ИГРУ!';
+    
+    const totalSeconds = data.days * 86400 + data.hours * 3600 + data.minutes * 60 + data.seconds;
+    const maxSeconds = 14 * 86400; // Примерно 2 недели
+    const progress = Math.min(100, Math.max(0, Math.floor(((maxSeconds - totalSeconds) / maxSeconds) * 100)));
+    const filled = Math.floor(progress / 5);
+    const empty = 20 - filled;
+    
+    // Время в Новосибирске (MSK+4)
+    const now = new Date();
+    const targetDate = new Date(now.getTime() + totalSeconds * 1000);
+    
+    const mskDate = targetDate.toLocaleString('ru-RU', { timeZone: 'Europe/Moscow', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' });
+    const nskDate = targetDate.toLocaleString('ru-RU', { timeZone: 'Asia/Novosibirsk', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' });
+    
+    return [
+        `# ⏳ ДО ЗАПУСКА ЛИГИ ⏳`,
+        `## 🏰 POE2 — ANCIENT LEAGUE 🏰`,
+        ``,
+        `## ${data.days}д : ${data.hours}ч : ${data.minutes}м : ${data.seconds}с`,
+        ``,
+        `${'🟢'.repeat(filled)}${'⚪'.repeat(empty)} **${progress}%**`,
+        ``,
+        `📅 ${mskDate.split(',')[0]}`,
+        `   🇷🇺 МСК **${mskDate.split(',')[1]?.trim() || ''}**`,
+        `   🇷🇺 НСК **${nskDate.split(',')[1]?.trim() || ''}**`,
+    ].join('\n');
+}
+
+async function updatePoE2Timer() {
+    if (!poe2TimerMessage || !poe2TimerChannel) return;
+    
+    const data = await getPoE2TimerData();
+    const content = formatPoE2Message(data);
+    
+    try {
+        await poe2TimerMessage.edit({ content: content.substring(0, 2000) });
+        console.log('⏳ Таймер PoE2 обновлён');
+    } catch (e) {
+        console.error('Ошибка обновления таймера:', e.message);
+    }
+}
+
+async function startPoE2Timer(channel) {
+    // Останавливаем старый таймер если есть
+    if (poe2TimerInterval) clearInterval(poe2TimerInterval);
+    if (poe2TimerMessage) {
+        try { await poe2TimerMessage.delete(); } catch (e) {}
+    }
+    
+    poe2TimerChannel = channel;
+    
+    const data = await getPoE2TimerData();
+    const content = formatPoE2Message(data);
+    
+    poe2TimerMessage = await channel.send({ content: content.substring(0, 2000) });
+    console.log('⏳ Таймер PoE2 создан');
+    
+    // Обновляем каждые 30 секунд
+    poe2TimerInterval = setInterval(updatePoE2Timer, 30000);
+}
+
+async function stopPoE2Timer() {
+    if (poe2TimerInterval) clearInterval(poe2TimerInterval);
+    if (poe2TimerMessage) {
+        try { await poe2TimerMessage.delete(); } catch (e) {}
+    }
+    poe2TimerMessage = null;
+    poe2TimerChannel = null;
+    poe2TimerInterval = null;
+}
+
+// ========== HEROES ==========
 const heroes = [
     { name: "Rehan", title: "Berserker | Anger", emoji: "🪓", id: "Anger" },
     { name: "Rehan", title: "Seething Silhouette", emoji: "👻", id: "Seething_Silhouette" },
@@ -154,60 +263,38 @@ function parseItemPage(html) {
     return { seasons, progression, heroData };
 }
 
-// Функция для правильного кодирования URL (пробелы → _)
 function encodeUrlName(name) {
     return name.replace(/\s+/g, '_').replace(/'/g, '%27').replace(/:/g, '%3A').replace(/\(/g, '%28').replace(/\)/g, '%29');
 }
 
-// Прямой поиск — пробуем ОБА языка
 async function searchTlidbDirect(name) {
     const encoded = encodeUrlName(name);
-    
     for (const lang of ['en', 'ru']) {
         const url = `https://tlidb.com/${lang}/${encoded}`;
-        console.log(`🔗 Пробую: ${url}`);
         try {
             const response = await fetch(url);
             if (response.ok && !response.url.includes('/search')) {
                 const html = await response.text();
                 const data = parseItemPage(html);
-                if (data.seasons.length > 0 || data.progression.length > 0) {
-                    console.log(`✅ Найдено: ${url}`);
-                    return { ...data, url, found: true };
-                }
+                if (data.seasons.length > 0 || data.progression.length > 0) return { ...data, url, found: true };
             }
-        } catch (e) {
-            console.log(`❌ Ошибка: ${e.message}`);
-        }
+        } catch (e) {}
     }
     return { seasons: [], progression: [], found: false };
 }
 
-// Поиск через поисковую строку
 async function searchTlidbSearch(name) {
     for (const lang of ['en', 'ru']) {
         const url = `https://tlidb.com/${lang}/search?q=${encodeURIComponent(name)}`;
-        console.log(`🔍 Поиск: ${url}`);
         try {
             const response = await fetch(url);
             const html = await response.text();
-            
-            // Если перекинуло на конкретную страницу
             if (response.url && !response.url.includes('/search')) {
                 const data = parseItemPage(html);
-                if (data.seasons.length > 0 || data.progression.length > 0) {
-                    console.log(`✅ Найдено через поиск: ${response.url}`);
-                    return { ...data, url: response.url, found: true };
-                }
+                if (data.seasons.length > 0 || data.progression.length > 0) return { ...data, url: response.url, found: true };
             }
-            
             const data = parseItemPage(html);
-            if (data.seasons.length > 0 || data.progression.length > 0) {
-                console.log(`✅ Найдено в результатах поиска`);
-                return { ...data, url: response.url || url, found: true };
-            }
-            
-            // Собираем ссылки
+            if (data.seasons.length > 0 || data.progression.length > 0) return { ...data, url: response.url || url, found: true };
             const links = [];
             const linkRegex = /<a[^>]*href="(\/(?:ru|en)\/[^"]+)"[^>]*>([^<]+)<\/a>/g;
             let match;
@@ -217,61 +304,45 @@ async function searchTlidbSearch(name) {
                     links.push({ title: text, url: `https://tlidb.com${link}` });
                 }
             }
-            if (links.length > 0) {
-                return { ...data, url, found: false, suggestions: links };
-            }
-        } catch (e) {
-            console.log(`❌ Ошибка поиска: ${e.message}`);
-        }
+            if (links.length > 0) return { ...data, url, found: false, suggestions: links };
+        } catch (e) {}
     }
     return { seasons: [], progression: [], found: false };
 }
 
-// Умный поиск с AI-коррекцией
 async function smartSearch(query) {
-    console.log(`\n🔍 ЗАПРОС: "${query}"`);
+    let cleanQuery = query.replace(/найди|нади|инфу|по|мне|информацию|что|такое|расскажи|про|дай|ка|че|тут|за|хуйня|ну|ты|конечно|нахуй|даун|блять|бля|пиздец|сука|about|find|info|search|please/gi, '').trim();
+    if (!cleanQuery || cleanQuery.length < 2) cleanQuery = query.trim();
     
-    // Шаг 1: AI исправляет запрос
-    let correctedQuery = query;
+    let translatedQuery = cleanQuery;
     try {
         const aiRes = await fetch(HELPER_WORKER, {
             method: "POST", headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ 
-                message: `Исправь запрос для поиска в базе Torchlight Infinite. Переведи на английский если надо. Ответь ТОЛЬКО правильным названием.\n\nЗапрос: "${query}"\n\nПримеры:\n"тандер спайк" → "Thunder Spike"\n"лип атак" → "Leap Attack"\n"хх" → "Headhunter"`,
+                message: `Переведи на АНГЛИЙСКИЙ название скилла/предмета/героя из Torchlight Infinite. Ответь ТОЛЬКО английским названием.\n\nРусское: "${cleanQuery}"\nАнглийское:`,
                 currentAuthor: "user", context: [] 
             })
         });
         const t = (await aiRes.json()).reply || '';
-        if (t.length > 2 && t.length < 60 && !t.includes('Не уверен')) {
-            correctedQuery = t.replace(/["'`]/g, '').trim();
-            console.log(`🤖 AI исправил: "${query}" → "${correctedQuery}"`);
+        const cleaned = t.replace(/["'`]/g, '').trim();
+        if (/^[a-zA-Z0-9\s:'\-_()]+$/.test(cleaned) && cleaned.length > 2 && cleaned.length < 80) {
+            translatedQuery = cleaned;
         }
-    } catch (e) {
-        console.log('⚠️ AI не ответил, пробую исходный запрос');
+    } catch (e) {}
+    
+    let result = await searchTlidbDirect(translatedQuery);
+    if (result.found) return { ...result, searchName: translatedQuery };
+    if (translatedQuery !== cleanQuery) {
+        result = await searchTlidbDirect(cleanQuery);
+        if (result.found) return { ...result, searchName: cleanQuery };
     }
-    
-    // Шаг 2: Прямой поиск с ИСПРАВЛЕННЫМ запросом
-    let result = await searchTlidbDirect(correctedQuery);
-    if (result.found) return { ...result, searchName: correctedQuery };
-    
-    // Шаг 3: Прямой поиск с ОРИГИНАЛЬНЫМ запросом
-    if (correctedQuery !== query) {
-        result = await searchTlidbDirect(query);
-        if (result.found) return { ...result, searchName: query };
+    result = await searchTlidbSearch(translatedQuery);
+    if (result.found) return { ...result, searchName: translatedQuery };
+    if (translatedQuery !== cleanQuery) {
+        result = await searchTlidbSearch(cleanQuery);
+        if (result.found) return { ...result, searchName: cleanQuery };
     }
-    
-    // Шаг 4: Поиск через поисковую строку с ИСПРАВЛЕННЫМ
-    result = await searchTlidbSearch(correctedQuery);
-    if (result.found) return { ...result, searchName: correctedQuery };
-    
-    // Шаг 5: Поиск через поисковую строку с ОРИГИНАЛЬНЫМ
-    if (correctedQuery !== query) {
-        result = await searchTlidbSearch(query);
-        if (result.found) return { ...result, searchName: query };
-    }
-    
-    console.log('❌ Ничего не найдено');
-    return { seasons: [], progression: [], url: `https://tlidb.com/en/search?q=${encodeURIComponent(correctedQuery)}`, found: false, searchName: correctedQuery, suggestions: result?.suggestions || [] };
+    return { seasons: [], progression: [], url: `https://tlidb.com/en/search?q=${encodeURIComponent(translatedQuery)}`, found: false, searchName: translatedQuery, suggestions: result?.suggestions || [] };
 }
 
 function formatResult(data, query) {
@@ -329,6 +400,8 @@ const commands = [
     new SlashCommandBuilder().setName('wheel').setDescription('🎯 Колесо фортуны — выбор героя')
         .addIntegerOption(o => o.setName('count').setDescription('2-8').setRequired(false).setMinValue(2).setMaxValue(8)),
     new SlashCommandBuilder().setName('quiz').setDescription('🎉 Викторина с призом'),
+    new SlashCommandBuilder().setName('poe2').setDescription('⏳ Таймер до запуска лиги Path of Exile 2'),
+    new SlashCommandBuilder().setName('poe2stop').setDescription('⏹ Остановить таймер PoE2'),
     new SlashCommandBuilder().setName('savesettings').setDescription('Сохранить настройки'),
     new SlashCommandBuilder().setName('settings').setDescription('Показать настройки'),
     new SlashCommandBuilder().setName('cleanup').setDescription('Очистка команд'),
@@ -369,6 +442,21 @@ client.on('interactionCreate', async (interaction) => {
         return;
     }
     
+    // poe2 и poe2stop доступны всем
+    if (commandName === 'poe2') {
+        await interaction.deferReply({ flags: 64 });
+        await startPoE2Timer(interaction.channel);
+        await interaction.editReply({ content: '✅ Таймер запущен!' });
+        return;
+    }
+    
+    if (commandName === 'poe2stop') {
+        await interaction.deferReply({ flags: 64 });
+        await stopPoE2Timer();
+        await interaction.editReply({ content: '✅ Таймер остановлен!' });
+        return;
+    }
+    
     if (commandName === 'quiz') {
         await interaction.deferReply();
         const qRes = await fetch(HELPER_WORKER, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ message: "Придумай ТУПОЙ и ГРУБЫЙ вопрос с чёрным юмором. Используй мат. 1 предложение. Только вопрос.", currentAuthor: interaction.user.username, context: [] }) });
@@ -377,9 +465,7 @@ client.on('interactionCreate', async (interaction) => {
         const pRes = await fetch(HELPER_WORKER, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ message: "Придумай смешной фейковый приз (1-3 слова с эмодзи).", currentAuthor: interaction.user.username, context: [] }) });
         const pData = await pRes.json();
         const prize = pData.reply || "💎 1000 FE";
-        
         await interaction.editReply({ content: `# 🎉 ВИКТОРИНА!\n## Приз: ${prize}\n❓ ${question}\n_Жду 30 секунд, потом выберу лучший ответ!_` });
-        
         const answers = [];
         const collector = interaction.channel.createMessageCollector({ filter: m => !m.author.bot, time: 30000 });
         collector.on('collect', (m) => answers.push({ author: m.author.username, content: m.content }));
@@ -421,7 +507,7 @@ client.on('interactionCreate', async (interaction) => {
         return;
     }
     
-    if (!isAdmin(interaction.user.id)) return interaction.reply({ content: '🚫 Нет прав! Используй /wheel или /quiz', flags: 64 });
+    if (!isAdmin(interaction.user.id)) return interaction.reply({ content: '🚫 Нет прав! Используй /wheel /quiz /poe2', flags: 64 });
     
     if (commandName === 'cleanup') { await interaction.deferReply({ flags: 64 }); await rest.put(Routes.applicationCommands(CLIENT_ID), { body: [] }); await new Promise(r => setTimeout(r, 2000)); await rest.put(Routes.applicationCommands(CLIENT_ID), { body: commands }); return interaction.editReply({ content: '✅ Готово' }); }
     await interaction.deferReply({ flags: 64 });
@@ -432,7 +518,7 @@ client.on('interactionCreate', async (interaction) => {
     if (commandName === 'smilelist') { const entries = Object.entries(settings.autoReactions); if (!entries.length) return interaction.editReply({ content: '📋 Пусто' }); return interaction.editReply({ content: entries.map(([id, e]) => `${Array.isArray(e)?e.join(' '):e} → <@${id}>`).join('\n') }); }
     if (commandName === 'savesettings') return interaction.editReply({ content: `BOT_SETTINGS=\n${JSON.stringify(settings)}` });
     if (commandName === 'settings') return interaction.editReply({ content: `Вкл: ${settings.enabled}\nШанс: ${settings.roastChance}%\nРеакций: ${Object.keys(settings.autoReactions).length}\nАдминов: ${settings.admins.length}` });
-    if (commandName === 'help') return interaction.editReply({ content: '**Всем:** /wheel /quiz\n**Админам:** /toggle /roastchance /loversmile /stopsmile /smilelist /savesettings /settings /cleanup\n**Владельцу:** /loveadmin' });
+    if (commandName === 'help') return interaction.editReply({ content: '**Всем:** /wheel /quiz /poe2 /poe2stop\n**Админам:** /toggle /roastchance /loversmile /stopsmile /smilelist /savesettings /settings /cleanup\n**Владельцу:** /loveadmin' });
 });
 
 client.on('messageReactionRemove', async (reaction, user) => {
