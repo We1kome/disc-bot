@@ -61,46 +61,41 @@ function getPoE2TimerData() {
 }
 
 async function setPoE2Date(userInput) {
-    // Получаем текущее время МСК
+    // Извлекаем числа из запроса
+    const days = userInput.match(/(\d+)\s*д/);
+    const hours = userInput.match(/(\d+)\s*ч/);
+    const minutes = userInput.match(/(\d+)\s*м(?!с)/);
+    const seconds = userInput.match(/(\d+)\s*с/);
+    
+    const d = days ? parseInt(days[1]) : 0;
+    const h = hours ? parseInt(hours[1]) : 0;
+    const m = minutes ? parseInt(minutes[1]) : 0;
+    const s = seconds ? parseInt(seconds[1]) : 0;
+    
+    if (d === 0 && h === 0 && m === 0 && s === 0) return { success: false };
+    
+    // Получаем текущее МСК
     const msk = getCurrentTime('Europe/Moscow');
-    const nsk = getCurrentTime('Asia/Novosibirsk');
+    const targetDate = new Date(msk.year, msk.month - 1, msk.day, msk.hours, msk.minutes, msk.seconds);
     
-    const aiRes = await fetch(HELPER_WORKER, {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ 
-            message: `Сейчас МСК: ${msk.day} мая ${msk.hours}:${msk.minutes}:${msk.seconds}. НСК: ${nsk.day} мая ${nsk.hours}:${nsk.minutes}:${nsk.seconds}.\n\nПользователь хочет добавить к текущему времени: "${userInput}"\n\nВычисли сколько ДНЕЙ, ЧАСОВ, МИНУТ и СЕКУНД нужно добавить к МСК. Ответь СТРОГО четырьмя числами через пробел: ДНИ ЧАСЫ МИНУТЫ СЕКУНДЫ\n\nПример: "2 часа 19 минут" → 0 2 19 0\n"5 дней 3 часа" → 5 3 0 0`,
-            currentAuthor: "timer", context: [] 
-        })
-    });
+    // Прибавляем
+    targetDate.setDate(targetDate.getDate() + d);
+    targetDate.setHours(targetDate.getHours() + h);
+    targetDate.setMinutes(targetDate.getMinutes() + m);
+    targetDate.setSeconds(targetDate.getSeconds() + s);
     
-    const reply = (await aiRes.json()).reply || '';
-    console.log('🤖 AI:', reply);
+    targetMSK = {
+        year: targetDate.getFullYear(),
+        month: targetDate.getMonth() + 1,
+        day: targetDate.getDate(),
+        hours: targetDate.getHours(),
+        minutes: targetDate.getMinutes(),
+        seconds: targetDate.getSeconds()
+    };
     
-    const parts = reply.trim().split(/\s+/).map(Number);
-    if (parts.length >= 4 && parts.every(p => !isNaN(p))) {
-        const [addDays, addHours, addMinutes, addSeconds] = parts;
-        
-        // Добавляем к текущему МСК
-        const targetDate = new Date(msk.year, msk.month - 1, msk.day, msk.hours, msk.minutes, msk.seconds);
-        targetDate.setDate(targetDate.getDate() + addDays);
-        targetDate.setHours(targetDate.getHours() + addHours);
-        targetDate.setMinutes(targetDate.getMinutes() + addMinutes);
-        targetDate.setSeconds(targetDate.getSeconds() + addSeconds);
-        
-        targetMSK = {
-            year: targetDate.getFullYear(),
-            month: targetDate.getMonth() + 1,
-            day: targetDate.getDate(),
-            hours: targetDate.getHours(),
-            minutes: targetDate.getMinutes(),
-            seconds: targetDate.getSeconds()
-        };
-        
-        const formatted = `${targetMSK.day} ${['','января','февраля','марта','апреля','мая','июня','июля','августа','сентября','октября','ноября','декабря'][targetMSK.month]} в ${String(targetMSK.hours).padStart(2,'0')}:${String(targetMSK.minutes).padStart(2,'0')} МСК`;
-        return { success: true, formatted };
-    }
-    
-    return { success: false };
+    const months = ['','января','февраля','марта','апреля','мая','июня','июля','августа','сентября','октября','ноября','декабря'];
+    const formatted = `${targetMSK.day} ${months[targetMSK.month]} в ${String(targetMSK.hours).padStart(2,'0')}:${String(targetMSK.minutes).padStart(2,'0')} МСК`;
+    return { success: true, formatted };
 }
 
 function formatPoE2Message(data) {
