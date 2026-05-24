@@ -48,30 +48,56 @@ async function getPoE2TimerData() {
 }
 
 async function setPoE2Date(userInput) {
+    const currentDate = settings.poe2LeagueDate || 'не установлена';
+    
     const aiRes = await fetch(HELPER_WORKER, {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ 
-            message: `Преврати это в точную дату ISO (2026-06-06T22:00:00+03:00).\n\n"${userInput}"\n\nТолько дата или ERROR.`,
+            message: `Ты — система точного управления таймером лиги Path of Exile 2.
+
+Текущая дата лиги: ${currentDate}
+Текущее время сейчас: ${new Date().toISOString()}
+
+Пользователь написал: "${userInput}"
+
+Твоя задача — вычислить НОВУЮ дату лиги на основе запроса пользователя.
+
+ПРАВИЛА:
+- Понимай ЛЮБЫЕ формулировки: "прибавь час", "отними 10 секунд", "поставь на 29 мая 22:00 МСК", "сдвинь на 2 дня вперёд", "завтра в 20:00", "через неделю", "14 июня 18:00"
+- Если текущая дата "не установлена" — используй текущий год (2026)
+- МСК = UTC+3
+- Всегда возвращай дату строго в формате ISO: 2026-05-29T22:00:00+03:00
+
+Ответь ТОЛЬКО ISO датой, ничего больше. Если совсем не понял — ответь "ERROR".`,
             currentAuthor: "timer", context: [] 
         })
     });
+    
     const reply = (await aiRes.json()).reply || '';
+    console.log('🤖 AI:', reply);
+    
+    // ISO дата
     const isoMatch = reply.match(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[+-]\d{2}:\d{2}/);
     if (isoMatch) {
         const date = isoMatch[0];
-        if (!isNaN(new Date(date).getTime()) && new Date(date) > new Date()) {
+        const parsed = new Date(date);
+        if (!isNaN(parsed.getTime()) && parsed > new Date()) {
             settings.poe2LeagueDate = date;
-            return { success: true, date: new Date(date) };
+            return { success: true, date: parsed };
         }
     }
+    
+    // Просто дата
     const dateMatch = reply.match(/\d{4}-\d{2}-\d{2}/);
     if (dateMatch) {
         const date = dateMatch[0] + 'T22:00:00+03:00';
-        if (!isNaN(new Date(date).getTime()) && new Date(date) > new Date()) {
+        const parsed = new Date(date);
+        if (!isNaN(parsed.getTime()) && parsed > new Date()) {
             settings.poe2LeagueDate = date;
-            return { success: true, date: new Date(date) };
+            return { success: true, date: parsed };
         }
     }
+    
     return { success: false };
 }
 
