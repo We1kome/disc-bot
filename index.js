@@ -44,44 +44,104 @@ async function getPoE2TimerData() {
 
 async function setPoE2Date(userInput) {
     const now = new Date();
-    const currentTime = now.toISOString();
-    const mskTime = now.toLocaleString('ru-RU', { timeZone: 'Europe/Moscow' });
-    const oldSeconds = poe2LeagueSeconds;
+    let seconds = null;
     
-    const aiRes = await fetch(HELPER_WORKER, {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ 
-            message: `Текущее реальное время: ${mskTime} (МСК)
-Текущее время в секундах от эпохи: ${Math.floor(now.getTime() / 1000)}
-${oldSeconds ? `Ранее установлено: ${oldSeconds} секунд до лиги` : 'Таймер ещё не установлен'}
-
-Пользователь написал: "${userInput}"
-
-Вычисли сколько СЕКУНД осталось до лиги PoE2 от ТЕКУЩЕГО МОМЕНТА.
-
-ВАЖНО:
-- "через 5 дней 3 часа 33 минуты 50 секунд" = 5*86400 + 3*3600 + 33*60 + 50 = ${5*86400 + 3*3600 + 33*60 + 50} секунд
-- "29 мая 22:00 МСК" = посчитай разницу между сейчас (${mskTime}) и 29 мая 2026 22:00 МСК
-- "прибавь 1 час" = ${oldSeconds || 0} + 3600
-- "отними 10 секунд" = ${oldSeconds || 0} - 10
-
-Ответь ТОЛЬКО одним целым числом (количество секунд).`,
-            currentAuthor: "timer", context: [] 
-        })
-    });
+    // РУЧНОЙ ПАРСИНГ — без AI, мгновенно и точно
     
-    const reply = (await aiRes.json()).reply || '';
-    console.log('🤖 AI:', reply);
+    // "через X дней Y часов Z минут W секунд"
+    const throughMatch = userInput.match(/через\s*(\d+)\s*д(?:ень|ня|ней)?\s*(?:и\s*)?(\d+)\s*час(?:а|ов)?\s*(?:и\s*)?(\d+)\s*минут(?:у|ы)?\s*(?:и\s*)?(\d+)\s*секунд(?:у|ы)?/i);
+    if (throughMatch) {
+        const d = parseInt(throughMatch[1]) || 0;
+        const h = parseInt(throughMatch[2]) || 0;
+        const m = parseInt(throughMatch[3]) || 0;
+        const s = parseInt(throughMatch[4]) || 0;
+        seconds = d * 86400 + h * 3600 + m * 60 + s;
+        console.log(`✅ Ручной парсинг: ${d}д ${h}ч ${m}м ${s}с = ${seconds} сек`);
+    }
     
-    const secondsMatch = reply.match(/-?\d+/);
-    if (secondsMatch) {
-        const seconds = parseInt(secondsMatch[0]);
-        if (seconds > 0 && seconds < 315360000) {
-            poe2LeagueSeconds = seconds;
-            if (poe2TimerChannel) startPoE2Timer(poe2TimerChannel);
-            return { success: true, date: new Date(Date.now() + seconds * 1000) };
+    // "X мая через Y часов Z минут"
+    if (!seconds) {
+        const dateThroughMatch = userInput.match(/(\d+)\s*мая\s*через\s*(\d+)\s*час(?:а|ов)?\s*(?:и\s*)?(\d+)\s*минут(?:у|ы)?/i);
+        if (dateThroughMatch) {
+            const day = parseInt(dateThroughMatch[1]);
+            const h = parseInt(dateThroughMatch[2]) || 0;
+            const m = parseInt(dateThroughMatch[3]) || 0;
+            const target = new Date(2026, 4, day, h, m, 0); // май = 4
+            seconds = Math.floor((target - now) / 1000);
+            console.log(`✅ Дата+время: ${day} мая ${h}:${m} = ${seconds} сек`);
         }
     }
+    
+    // "X мая YY:ZZ МСК"
+    if (!seconds) {
+        const dateTimeMatch = userInput.match(/(\d+)\s*мая\s*(\d{1,2}):(\d{2})\s*(?:МСК|MSK)?/i);
+        if (dateTimeMatch) {
+            const day = parseInt(dateTimeMatch[1]);
+            const h = parseInt(dateTimeMatch[2]);
+            const m = parseInt(dateTimeMatch[3]);
+            const target = new Date(2026, 4, day, h, m, 0);
+            seconds = Math.floor((target - now) / 1000);
+            console.log(`✅ Дата+время2: ${day} мая ${h}:${m} = ${seconds} сек`);
+        }
+    }
+    
+    // "прибавь X часов" или "+X часов"
+    if (!seconds) {
+        const addMatch = userInput.match(/(?:прибавь|добавь|\+)\s*(\d+)\s*час(?:а|ов)?/i);
+        if (addMatch && poe2LeagueSeconds) {
+            seconds = poe2LeagueSeconds + parseInt(addMatch[1]) * 3600;
+            console.log(`✅ Прибавка: +${addMatch[1]}ч = ${seconds} сек`);
+        }
+    }
+    
+    // "отними X часов" или "-X часов"
+    if (!seconds) {
+        const subMatch = userInput.match(/(?:отними|убравь|убавь|\-)\s*(\d+)\s*час(?:а|ов)?/i);
+        if (subMatch && poe2LeagueSeconds) {
+            seconds = poe2LeagueSeconds - parseInt(subMatch[1]) * 3600;
+            console.log(`✅ Убавка: -${subMatch[1]}ч = ${seconds} сек`);
+        }
+    }
+    
+    // "прибавь X минут"
+    if (!seconds) {
+        const addMinMatch = userInput.match(/(?:прибавь|добавь|\+)\s*(\d+)\s*минут(?:у|ы)?/i);
+        if (addMinMatch && poe2LeagueSeconds) {
+            seconds = poe2LeagueSeconds + parseInt(addMinMatch[1]) * 60;
+        }
+    }
+    
+    // "прибавь X секунд"
+    if (!seconds) {
+        const addSecMatch = userInput.match(/(?:прибавь|добавь|\+)\s*(\d+)\s*секунд(?:у|ы)?/i);
+        if (addSecMatch && poe2LeagueSeconds) {
+            seconds = poe2LeagueSeconds + parseInt(addSecMatch[1]);
+        }
+    }
+    
+    // Если ручной парсинг не сработал — пробуем AI
+    if (!seconds) {
+        console.log('🤖 Ручной парсинг не сработал, пробую AI...');
+        const aiRes = await fetch(HELPER_WORKER, {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ 
+                message: `Сейчас: ${now.toLocaleString('ru-RU', {timeZone: 'Europe/Moscow'})} МСК. Вычисли сколько СЕКУНД до лиги PoE2: "${userInput}". Ответь ТОЛЬКО числом.`,
+                currentAuthor: "timer", context: [] 
+            })
+        });
+        const reply = (await aiRes.json()).reply || '';
+        const match = reply.match(/\d+/);
+        if (match) seconds = parseInt(match[0]);
+    }
+    
+    if (seconds && seconds > 60 && seconds < 315360000) {
+        poe2LeagueSeconds = seconds;
+        if (poe2TimerChannel) startPoE2Timer(poe2TimerChannel);
+        const target = new Date(now.getTime() + seconds * 1000);
+        const formatted = target.toLocaleString('ru-RU', { timeZone: 'Europe/Moscow', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' });
+        return { success: true, date: target, formatted };
+    }
+    
     return { success: false };
 }
 
