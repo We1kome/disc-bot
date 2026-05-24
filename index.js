@@ -31,63 +31,119 @@ function isAdmin(userId) { return userId === OWNER_ID || settings.admins.include
 
 // ========== POE2 TIMER ==========
 async function getPoE2TimerData() {
+    console.log('⏳ Запрашиваю таймер PoE2...');
+    
+    // Пробуем API
     try {
-        // Пробуем API (более надёжный способ)
+        console.log('🔗 Пробую API...');
         const apiResponse = await fetch('https://pathofexile2.com/internal-api/content.json');
+        console.log('📡 Статус API:', apiResponse.status);
+        
         if (apiResponse.ok) {
             const data = await apiResponse.json();
+            console.log('📦 Ключи API:', Object.keys(data).join(', '));
             
-            // Ищем таймер в секциях страницы
-            if (data && data.sections) {
+            // Проверяем разные возможные структуры
+            if (data.timer) {
+                console.log('✅ Найден data.timer');
+                const target = new Date(data.timer.target).getTime();
+                const now = Date.now();
+                const diff = target - now;
+                if (diff > 0) {
+                    return {
+                        days: Math.floor(diff / 86400000),
+                        hours: Math.floor((diff % 86400000) / 3600000),
+                        minutes: Math.floor((diff % 3600000) / 60000),
+                        seconds: Math.floor((diff % 60000) / 1000)
+                    };
+                }
+                return { expired: true };
+            }
+            
+            if (data.sections) {
+                console.log('🔍 Ищу в sections...');
                 for (const section of data.sections) {
                     if (section.timer) {
+                        console.log('✅ Найден section.timer');
                         const target = new Date(section.timer.target).getTime();
                         const now = Date.now();
                         const diff = target - now;
-                        
-                        if (diff <= 0) return { expired: true };
-                        
-                        return {
-                            days: Math.floor(diff / 86400000),
-                            hours: Math.floor((diff % 86400000) / 3600000),
-                            minutes: Math.floor((diff % 3600000) / 60000),
-                            seconds: Math.floor((diff % 60000) / 1000),
-                            target: section.timer.target
-                        };
+                        if (diff > 0) {
+                            return {
+                                days: Math.floor(diff / 86400000),
+                                hours: Math.floor((diff % 86400000) / 3600000),
+                                minutes: Math.floor((diff % 3600000) / 60000),
+                                seconds: Math.floor((diff % 60000) / 1000)
+                            };
+                        }
+                        return { expired: true };
                     }
                 }
             }
+            
+            // Выводим весь JSON для отладки
+            console.log('📄 Контент API (первые 500 символов):', JSON.stringify(data).substring(0, 500));
         }
     } catch (e) {
-        console.log('API не сработал, пробую HTML');
+        console.error('❌ Ошибка API:', e.message);
     }
     
-    // Запасной вариант — парсим HTML
+    // Парсим HTML
     try {
+        console.log('🔗 Пробую HTML...');
         const response = await fetch('https://pathofexile2.com/home');
         const html = await response.text();
         
-        // Ищем дату в data атрибутах или скриптах
+        // Ищем countdown
+        const daysMatch = html.match(/poe2-countdown__ticker--days">(\d+)</);
+        const hoursMatch = html.match(/poe2-countdown__ticker--hours">(\d+)</);
+        const minutesMatch = html.match(/poe2-countdown__ticker--minutes">(\d+)</);
+        const secondsMatch = html.match(/poe2-countdown__ticker--seconds">(\d+)</);
+        
+        console.log('🔍 HTML таймер:', { 
+            days: daysMatch?.[1], 
+            hours: hoursMatch?.[1], 
+            minutes: minutesMatch?.[1], 
+            seconds: secondsMatch?.[1] 
+        });
+        
+        if (daysMatch && hoursMatch && minutesMatch && secondsMatch) {
+            console.log('✅ Найден HTML таймер');
+            return {
+                days: parseInt(daysMatch[1]),
+                hours: parseInt(hoursMatch[1]),
+                minutes: parseInt(minutesMatch[1]),
+                seconds: parseInt(secondsMatch[1])
+            };
+        }
+        
+        // Ищем target в JSON внутри HTML
         const targetMatch = html.match(/"target":"([^"]+)"/);
         if (targetMatch) {
+            console.log('✅ Найден target в HTML:', targetMatch[1]);
             const target = new Date(targetMatch[1]).getTime();
             const now = Date.now();
             const diff = target - now;
-            
-            if (diff <= 0) return { expired: true };
-            
-            return {
-                days: Math.floor(diff / 86400000),
-                hours: Math.floor((diff % 86400000) / 3600000),
-                minutes: Math.floor((diff % 3600000) / 60000),
-                seconds: Math.floor((diff % 60000) / 1000),
-                target: targetMatch[1]
-            };
+            if (diff > 0) {
+                return {
+                    days: Math.floor(diff / 86400000),
+                    hours: Math.floor((diff % 86400000) / 3600000),
+                    minutes: Math.floor((diff % 3600000) / 60000),
+                    seconds: Math.floor((diff % 60000) / 1000)
+                };
+            }
+            return { expired: true };
         }
+        
+        // Логируем кусок HTML где должен быть таймер
+        const timerSection = html.match(/poe2-countdown[^<]*<[\s\S]{0,500}/);
+        console.log('🔍 Секция таймера в HTML:', timerSection?.[0] || 'НЕ НАЙДЕНА');
+        
     } catch (e) {
-        console.error('Ошибка HTML:', e.message);
+        console.error('❌ Ошибка HTML:', e.message);
     }
     
+    console.log('❌ Таймер не найден');
     return null;
 }
 
