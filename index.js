@@ -32,29 +32,63 @@ function isAdmin(userId) { return userId === OWNER_ID || settings.admins.include
 // ========== POE2 TIMER ==========
 async function getPoE2TimerData() {
     try {
+        // Пробуем API (более надёжный способ)
+        const apiResponse = await fetch('https://pathofexile2.com/internal-api/content.json');
+        if (apiResponse.ok) {
+            const data = await apiResponse.json();
+            
+            // Ищем таймер в секциях страницы
+            if (data && data.sections) {
+                for (const section of data.sections) {
+                    if (section.timer) {
+                        const target = new Date(section.timer.target).getTime();
+                        const now = Date.now();
+                        const diff = target - now;
+                        
+                        if (diff <= 0) return { expired: true };
+                        
+                        return {
+                            days: Math.floor(diff / 86400000),
+                            hours: Math.floor((diff % 86400000) / 3600000),
+                            minutes: Math.floor((diff % 3600000) / 60000),
+                            seconds: Math.floor((diff % 60000) / 1000),
+                            target: section.timer.target
+                        };
+                    }
+                }
+            }
+        }
+    } catch (e) {
+        console.log('API не сработал, пробую HTML');
+    }
+    
+    // Запасной вариант — парсим HTML
+    try {
         const response = await fetch('https://pathofexile2.com/home');
         const html = await response.text();
         
-        const daysMatch = html.match(/poe2-countdown__ticker--days">(\d+)</);
-        const hoursMatch = html.match(/poe2-countdown__ticker--hours">(\d+)</);
-        const minutesMatch = html.match(/poe2-countdown__ticker--minutes">(\d+)</);
-        const secondsMatch = html.match(/poe2-countdown__ticker--seconds">(\d+)</);
-        
-        if (daysMatch && hoursMatch && minutesMatch && secondsMatch) {
+        // Ищем дату в data атрибутах или скриптах
+        const targetMatch = html.match(/"target":"([^"]+)"/);
+        if (targetMatch) {
+            const target = new Date(targetMatch[1]).getTime();
+            const now = Date.now();
+            const diff = target - now;
+            
+            if (diff <= 0) return { expired: true };
+            
             return {
-                days: parseInt(daysMatch[1]),
-                hours: parseInt(hoursMatch[1]),
-                minutes: parseInt(minutesMatch[1]),
-                seconds: parseInt(secondsMatch[1])
+                days: Math.floor(diff / 86400000),
+                hours: Math.floor((diff % 86400000) / 3600000),
+                minutes: Math.floor((diff % 3600000) / 60000),
+                seconds: Math.floor((diff % 60000) / 1000),
+                target: targetMatch[1]
             };
         }
-        
-        // Если таймер не найден — лига уже запущена
-        return { expired: true };
     } catch (e) {
-        console.error('Ошибка таймера PoE2:', e.message);
-        return null;
+        console.error('Ошибка HTML:', e.message);
     }
+    
+    return null;
 }
 
 function formatPoE2Message(data) {
