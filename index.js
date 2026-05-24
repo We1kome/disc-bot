@@ -50,10 +50,10 @@ async function setPoE2Date(userInput) {
     
     const match = reply.match(/(\d{4})-(\d{2})-(\d{2})\s+(\d{2}):?(\d{2})/);
     if (match) {
-        // Создаём дату в МСК вручную, без JS-парсинга
         const targetDate = new Date();
         targetDate.setFullYear(parseInt(match[1]), parseInt(match[2]) - 1, parseInt(match[3]));
-        targetDate.setHours(parseInt(match[4]), parseInt(match[5]), 0, 0);
+        // МСК = UTC+3, поэтому вычитаем 3 часа для UTC
+        targetDate.setHours(parseInt(match[4]) - 3, parseInt(match[5]), 0, 0);
         
         const seconds = Math.floor((targetDate - now) / 1000);
         console.log('🎯 Целевая дата:', targetDate.toISOString(), 'Секунд:', seconds);
