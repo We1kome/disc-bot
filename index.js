@@ -45,12 +45,27 @@ async function getPoE2TimerData() {
 async function setPoE2Date(userInput) {
     const now = new Date();
     const currentTime = now.toISOString();
+    const mskTime = now.toLocaleString('ru-RU', { timeZone: 'Europe/Moscow' });
     const oldSeconds = poe2LeagueSeconds;
     
     const aiRes = await fetch(HELPER_WORKER, {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ 
-            message: `Сейчас: ${currentTime} (МСК: ${now.toLocaleString('ru-RU', {timeZone: 'Europe/Moscow'})})\n\nПользователь написал: "${userInput}"\n\nВычисли сколько СЕКУНД осталось до лиги PoE2.\n\nПРИМЕРЫ:\n"29 мая 22:00 МСК" → посчитай разницу в секундах между сейчас и 2026-05-29T22:00:00+03:00\n"через 5 дней 3 часа" → 5*86400 + 3*3600 = ${5*86400 + 3*3600}\n"прибавь 1 час" → ${oldSeconds || 0} + 3600\n"отними 10 секунд" → ${oldSeconds || 0} - 10\n\nОтветь ТОЛЬКО одним целым числом (количество секунд).`,
+            message: `Текущее реальное время: ${mskTime} (МСК)
+Текущее время в секундах от эпохи: ${Math.floor(now.getTime() / 1000)}
+${oldSeconds ? `Ранее установлено: ${oldSeconds} секунд до лиги` : 'Таймер ещё не установлен'}
+
+Пользователь написал: "${userInput}"
+
+Вычисли сколько СЕКУНД осталось до лиги PoE2 от ТЕКУЩЕГО МОМЕНТА.
+
+ВАЖНО:
+- "через 5 дней 3 часа 33 минуты 50 секунд" = 5*86400 + 3*3600 + 33*60 + 50 = ${5*86400 + 3*3600 + 33*60 + 50} секунд
+- "29 мая 22:00 МСК" = посчитай разницу между сейчас (${mskTime}) и 29 мая 2026 22:00 МСК
+- "прибавь 1 час" = ${oldSeconds || 0} + 3600
+- "отними 10 секунд" = ${oldSeconds || 0} - 10
+
+Ответь ТОЛЬКО одним целым числом (количество секунд).`,
             currentAuthor: "timer", context: [] 
         })
     });
