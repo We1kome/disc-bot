@@ -43,24 +43,30 @@ async function getPoE2TimerData() {
 
 async function setPoE2Date(userInput) {
     const now = new Date();
+    const mskTime = now.toLocaleString('ru-RU', { timeZone: 'Europe/Moscow' });
+    const nskTime = now.toLocaleString('ru-RU', { timeZone: 'Asia/Novosibirsk' });
     
     const aiRes = await fetch(HELPER_WORKER, {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ 
-            message: `Сейчас: ${now.toISOString()} (МСК: ${now.toLocaleString('ru-RU', {timeZone: 'Europe/Moscow'})})
-Текущий таймер: ${poe2LeagueSeconds ? Math.floor(poe2LeagueSeconds) + ' секунд до лиги' : 'не установлен'}
+            message: `Ты — таймер для России. Работаешь ТОЛЬКО с часовыми поясами РФ.
+
+СЕЙЧАС:
+- Москва (МСК, UTC+3): ${mskTime}
+- Новосибирск (НСК, UTC+7): ${nskTime}
 
 Пользователь написал: "${userInput}"
+${poe2LeagueSeconds ? `Текущий таймер: ${Math.floor(poe2LeagueSeconds)} секунд` : 'Таймер не установлен'}
 
-Вычисли сколько СЕКУНД осталось до лиги PoE2. Ответь ТОЛЬКО одним числом.
+Вычисли СЕКУНДЫ до лиги PoE2.
 
-Правила:
-- "через 5 дней 3 часа 23 минуты" → 5*86400 + 3*3600 + 23*60
-- "через 5 дней 3 часа 23 минуты 0 сек" → тоже самое, игнорируй "0 сек"
-- "29 мая 22:00 МСК" → разница между сейчас и 2026-05-29T22:00:00+03:00
-- "прибавь 1 час" → текущий_таймер + 3600
-- "отними 10 минут" → текущий_таймер - 600
-- Если текущий таймер не установлен, а просят "прибавь" — считай от 0`,
+ПРИМЕРЫ:
+"5 дней 3 часа 30 минут" → (5×86400) + (3×3600) + (30×60) = ${5*86400 + 3*3600 + 30*60}
+"29 мая 22:00 МСК" → разница между ${mskTime} и 29 мая 2026 22:00 МСК в секундах
+"прибавь 1 час" → ${poe2LeagueSeconds ? Math.floor(poe2LeagueSeconds) + 3600 : 3600}
+"отними 10 минут" → ${poe2LeagueSeconds ? Math.floor(poe2LeagueSeconds) - 600 : 0}
+
+Ответь ТОЛЬКО целым числом секунд.`,
             currentAuthor: "timer", context: [] 
         })
     });
@@ -68,7 +74,7 @@ async function setPoE2Date(userInput) {
     const reply = (await aiRes.json()).reply || '';
     console.log('🤖 AI:', reply);
     
-    const match = reply.match(/\d+/);
+    const match = reply.match(/-?\d+/);
     if (match) {
         const seconds = parseInt(match[0]);
         if (seconds > 60 && seconds < 315360000) {
