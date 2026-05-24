@@ -42,10 +42,21 @@ async function getPoE2TimerData() {
 }
 
 async function setPoE2Date(userInput) {
+    const now = new Date();
+    const mskTime = now.toLocaleString('ru-RU', { timeZone: 'Europe/Moscow' });
+    
     const aiRes = await fetch(HELPER_WORKER, {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ 
-            message: `Вычисли количество секунд по формуле: дни*86400 + часы*3600 + минуты*60 + секунды. Ответь ТОЛЬКО числом, не пиши даты. "${userInput}"`,
+            message: `Извлеки дату и время из фразы. Ответь СТРОГО в формате: YYYY-MM-DD HH:MM МСК
+
+ПРИМЕРЫ:
+"29 мая через 2 часа 55 минут 40 секунд" → 2026-05-29 02:55 МСК
+"29 мая через 3 часа" → 2026-05-29 03:00 МСК  
+"29 мая 22:00 МСК" → 2026-05-29 22:00 МСК
+
+Сейчас: ${mskTime} МСК (2026 год)
+Фраза: "${userInput}"`,
             currentAuthor: "timer", context: [] 
         })
     });
@@ -53,26 +64,16 @@ async function setPoE2Date(userInput) {
     const reply = (await aiRes.json()).reply || '';
     console.log('🤖 AI:', reply);
     
-    // Извлекаем ВСЕ числа и перемножаем
-    const numbers = reply.match(/\d+/g) || [];
-    if (numbers.length >= 1) {
-        let seconds;
-        if (numbers.length >= 4) {
-            seconds = parseInt(numbers[0]) * 86400 + parseInt(numbers[1]) * 3600 + parseInt(numbers[2]) * 60 + parseInt(numbers[3]);
-        } else if (numbers.length === 3) {
-            seconds = parseInt(numbers[0]) * 86400 + parseInt(numbers[1]) * 3600 + parseInt(numbers[2]) * 60;
-        } else if (numbers.length === 2) {
-            seconds = parseInt(numbers[0]) * 86400 + parseInt(numbers[1]) * 3600;
-        } else {
-            seconds = parseInt(numbers[0]);
-        }
+    // Извлекаем дату и время
+    const match = reply.match(/(\d{4})-(\d{2})-(\d{2})\s+(\d{2}):(\d{2})/);
+    if (match) {
+        const targetDate = new Date(parseInt(match[1]), parseInt(match[2]) - 1, parseInt(match[3]), parseInt(match[4]), parseInt(match[5]), 0);
+        const seconds = Math.floor((targetDate - now) / 1000);
         
         if (seconds > 60 && seconds < 315360000) {
             poe2LeagueSeconds = seconds;
-            const now = new Date();
-            const target = new Date(now.getTime() + seconds * 1000);
-            const formatted = target.toLocaleString('ru-RU', { timeZone: 'Europe/Moscow', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' });
-            return { success: true, date: target, formatted };
+            const formatted = targetDate.toLocaleString('ru-RU', { timeZone: 'Europe/Moscow', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' });
+            return { success: true, date: targetDate, formatted };
         }
     }
     
