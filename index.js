@@ -29,25 +29,13 @@ let poe2TimerChannel = null;
 let poe2TimerInterval = null;
 let poe2LeagueSeconds = null;
 
-async function getPoE2TimerData() {
-    if (poe2LeagueSeconds === null) return null;
-    if (poe2LeagueSeconds <= 0) return { expired: true };
-    const totalSeconds = Math.floor(poe2LeagueSeconds);
-    return {
-        days: Math.floor(totalSeconds / 86400),
-        hours: Math.floor((totalSeconds % 86400) / 3600),
-        minutes: Math.floor((totalSeconds % 3600) / 60),
-        seconds: totalSeconds % 60
-    };
-}
-
 async function setPoE2Date(userInput) {
     const now = new Date();
     
     const aiRes = await fetch(HELPER_WORKER, {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ 
-            message: `Извлеки дату и время. Ответь СТРОГО: YYYY-MM-DD HH:MM\n\n"29 мая 2 часа 47 минут" → 2026-05-29 02:47\n"29 мая 22:00 МСК" → 2026-05-29 22:00\n\nФраза: "${userInput}"`,
+            message: `Ответь одной строкой: ГГГГ-ММ-ДД ЧЧ:ММ\n\n"29 мая 22:00 МСК" → 2026-05-29 22:00\n"${userInput}" →`,
             currentAuthor: "timer", context: [] 
         })
     });
@@ -55,10 +43,11 @@ async function setPoE2Date(userInput) {
     const reply = (await aiRes.json()).reply || '';
     console.log('🤖 AI:', reply);
     
-    const match = reply.match(/(\d{4})-(\d{2})-(\d{2})\s+(\d{2}):?(\d{2})/);
-    if (match) {
+    // Ищем ГГГГ-ММ-ДД ЧЧ:ММ
+    const match = reply.match(/(\d{4})-(\d{2})-(\d{2})\s+(\d{2}):(\d{2})/);
+    if (match && parseInt(match[1]) === 2026) {
         const targetDate = new Date();
-        targetDate.setFullYear(parseInt(match[1]), parseInt(match[2]) - 1, parseInt(match[3]));
+        targetDate.setFullYear(2026, parseInt(match[2]) - 1, parseInt(match[3]));
         targetDate.setHours(parseInt(match[4]) - 3, parseInt(match[5]), 0, 0);
         
         const seconds = Math.floor((targetDate - now) / 1000);
