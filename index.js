@@ -111,12 +111,14 @@ async function setPoE2Date(userInput) {
         }
     }
     
-    // "прибавь X секунд"
-    if (!seconds) {
-        const addSecMatch = userInput.match(/(?:прибавь|добавь|\+)\s*(\d+)\s*секунд(?:у|ы)?/i);
-        if (addSecMatch && poe2LeagueSeconds) {
-            seconds = poe2LeagueSeconds + parseInt(addSecMatch[1]);
-        }
+    // "прибавь X секунд" (любые вариации)
+    if (!seconds && poe2LeagueSeconds) {
+        const addSecMatch = userInput.match(/(?:прибавь|добавь|\+)\s*(\d+)\s*(?:секунд|сек|sec|s)/i);
+        if (addSecMatch) seconds = poe2LeagueSeconds + parseInt(addSecMatch[1]);
+    }
+    if (!seconds && poe2LeagueSeconds) {
+        const subSecMatch = userInput.match(/(?:отними|убравь|убавь|\-)\s*(\d+)\s*(?:секунд|сек|sec|s)/i);
+        if (subSecMatch) seconds = poe2LeagueSeconds - parseInt(subSecMatch[1]);
     }
     
     // Если ручной парсинг не сработал — пробуем AI
@@ -125,18 +127,19 @@ async function setPoE2Date(userInput) {
         const aiRes = await fetch(HELPER_WORKER, {
             method: "POST", headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ 
-                message: `Сейчас: ${now.toLocaleString('ru-RU', {timeZone: 'Europe/Moscow'})} МСК. Вычисли сколько СЕКУНД до лиги PoE2: "${userInput}". Ответь ТОЛЬКО числом.`,
+                message: `Сейчас: ${now.toLocaleString('ru-RU', {timeZone: 'Europe/Moscow'})} МСК (${Math.floor(now.getTime()/1000)} секунд от эпохи). Вычисли сколько СЕКУНД до лиги PoE2: "${userInput}". Ответь ТОЛЬКО числом. Например "через 5 дней" = ${5*86400}, "29 мая 22:00 МСК" = разница в секундах.`,
                 currentAuthor: "timer", context: [] 
             })
         });
         const reply = (await aiRes.json()).reply || '';
+        console.log('🤖 AI ответ:', reply);
         const match = reply.match(/\d+/);
         if (match) seconds = parseInt(match[0]);
     }
     
     if (seconds && seconds > 60 && seconds < 315360000) {
         poe2LeagueSeconds = seconds;
-        if (poe2TimerChannel) startPoE2Timer(poe2TimerChannel);
+        // НЕ перезапускаем таймер здесь — он сам обновится через setInterval
         const target = new Date(now.getTime() + seconds * 1000);
         const formatted = target.toLocaleString('ru-RU', { timeZone: 'Europe/Moscow', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' });
         return { success: true, date: target, formatted };
