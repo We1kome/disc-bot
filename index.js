@@ -47,12 +47,16 @@ async function setPoE2Date(userInput) {
     const aiRes = await fetch(HELPER_WORKER, {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ 
-            message: `Извлеки дату и время. Ответь СТРОГО: YYYY-MM-DD HH:MM
+            message: `Извлеки ДАТУ и ВРЕМЯ СУТОК. Не прибавляй к текущему времени.
 
-"29 мая 2 часа 52 минуты" → 2026-05-29 02:52
-"29 мая 22:00" → 2026-05-29 22:00
+"29 мая 2 часа 50 минут 15 секунд" означает 29 мая в 02:50 ночи.
+Ответь: 2026-05-29 02:50
 
-Фраза: "${userInput}"`,
+"29 мая 22:00 МСК" означает 29 мая в 22:00 вечера.
+Ответь: 2026-05-29 22:00
+
+Фраза: "${userInput}"
+Ответь СТРОГО: YYYY-MM-DD HH:MM`,
             currentAuthor: "timer", context: [] 
         })
     });
@@ -60,7 +64,6 @@ async function setPoE2Date(userInput) {
     const reply = (await aiRes.json()).reply || '';
     console.log('🤖 AI:', reply);
     
-    // Принимаем и "02:52" и "0252"
     const match = reply.match(/(\d{4})-(\d{2})-(\d{2})\s+(\d{2}):?(\d{2})/);
     if (match) {
         const targetDate = new Date(parseInt(match[1]), parseInt(match[2]) - 1, parseInt(match[3]), parseInt(match[4]), parseInt(match[5]), 0);
